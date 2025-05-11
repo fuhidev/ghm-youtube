@@ -142,7 +142,7 @@ class MainWindow(QMainWindow):
             self.input_file_btn.setChecked(True)
             self.file_path_label.setVisible(True)
             self.browse_file_btn.setVisible(True)
-            self.file_selection_layout.setVisible(True)
+            # self.file_selection_layout.setVisible(True)
             self.story_input.setReadOnly(True)
             self.story_input.setStyleSheet("background-color: #f0f0f0;")
             if self.current_file_path:
@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
             self.input_file_btn.setChecked(False)
             self.file_path_label.setVisible(False)
             self.browse_file_btn.setVisible(False)
-            self.file_selection_layout.setVisible(False)
+            # self.file_selection_layout.setVisible(False)
             self.story_input.setReadOnly(False)
             self.story_input.setStyleSheet("")
 
