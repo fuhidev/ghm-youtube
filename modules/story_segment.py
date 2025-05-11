@@ -8,6 +8,7 @@ import requests
 import time
 from typing import List, Dict, Optional
 import textwrap
+from modules.translate import DeepseekTranslator
 
 # Configure logging
 logging.basicConfig(
@@ -68,6 +69,43 @@ class StorySegmenter:
 
         return self.segments
 
+    def translate_text_to_english(self, text: str) -> str:
+        """
+        Translate Vietnamese text to English using DeepSeek API
+
+        Args:
+            text (str): Vietnamese text to translate
+
+        Returns:
+            str: Translated English text
+        """
+        try:
+            # Get API key from environment variables
+            api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+            if not api_key:
+                logger.error("No DEEPSEEK_API_KEY found in environment variables")
+                return text
+
+            # Use the DeepseekTranslator from translate module
+            translator = DeepseekTranslator(api_key)
+
+            # Translate from Vietnamese to English
+            translated_text = translator.translate(
+                text,
+                source_lang="Vietnamese",
+                target_lang="English",
+                retries=3,
+                delay=2,
+            )
+
+            logger.info(f"Translation successful: {translated_text[:50]}...")
+            return translated_text
+
+        except Exception as e:
+            logger.error(f"Translation failed: {str(e)}")
+            # Return original text if translation fails
+            return text
+
     def generate_prompts(self) -> List[str]:
         """
         Generate image prompts for each segment
@@ -120,13 +158,23 @@ class StorySegmenter:
             # Make the prompt concise (max 250 characters)
             prompt = textwrap.shorten(prompt_text, width=250, placeholder="...")
 
-            # Add style instructions for consistency
-            style_instruction = (
+            # Add style instructions for consistency (in Vietnamese)
+            style_instruction_vi = (
                 "Hình ảnh hiện thực, phong cách tiên hiệp, "
                 "fantasy, chi tiết cao, ánh sáng tự nhiên"
             )
 
-            final_prompt = f"{prompt} {style_instruction}"
+            # Translate Vietnamese prompt to English for better Leonardo.ai results
+            english_prompt = self.translate_text_to_english(prompt)
+
+            # English style instruction equivalent
+            style_instruction_en = (
+                "Realistic image, xianxia style, "
+                "fantasy, high detail, natural lighting"
+            )
+
+            # Create final prompt in English
+            final_prompt = f"{english_prompt} {style_instruction_en}"
             self.prompts.append(final_prompt)
 
         return self.prompts

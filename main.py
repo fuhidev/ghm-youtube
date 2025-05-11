@@ -33,6 +33,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("GHM-Youtube")
         self.setGeometry(100, 100, 800, 600)
         self.api_key = "sk-b24c10868fa54902b565be1001666bfe"  # Default API key
+        self.api_leonardo_key = (
+            "2486143c-9dcb-48f5-8044-5be51de198fe"  # Default API key
+        )
         self.init_ui()
 
     def init_ui(self):
@@ -94,20 +97,59 @@ class MainWindow(QMainWindow):
         self.leonardo_key_input.setPlaceholderText(
             "Nhập Leonardo.ai API key để tạo hình"
         )
+        self.leonardo_key_input.setText(self.api_leonardo_key)
         self.leonardo_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         leonardo_key_layout.addWidget(leonardo_key_label)
         leonardo_key_layout.addWidget(self.leonardo_key_input)
         story_layout.addLayout(leonardo_key_layout)
 
-        # Image options
+        # Image generation options
         image_options_layout = QHBoxLayout()
+
+        # Checkbox để chọn giữa số lượng hình cố định và tự động theo thời gian
+        self.auto_images_checkbox = QCheckBox(
+            "Tự động tạo hình theo thời gian audio", self
+        )
+        self.auto_images_checkbox.setChecked(True)
+        self.auto_images_checkbox.toggled.connect(self.toggle_image_mode)
+
+        image_options_layout.addWidget(self.auto_images_checkbox)
+        story_layout.addLayout(image_options_layout)
+
+        # Container cho hai chế độ
+        self.image_settings_container = QHBoxLayout()
+
+        # 1. Chế độ số lượng cố định
+        self.fixed_image_layout = QHBoxLayout()
         image_count_label = QLabel("Số lượng hình ảnh:", self)
         self.image_count_combobox = QComboBox(self)
         for i in range(1, 11):  # 1 đến 10 hình
             self.image_count_combobox.addItem(f"{i} hình", i)
-        image_options_layout.addWidget(image_count_label)
-        image_options_layout.addWidget(self.image_count_combobox)
-        story_layout.addLayout(image_options_layout)
+        self.fixed_image_layout.addWidget(image_count_label)
+        self.fixed_image_layout.addWidget(self.image_count_combobox)
+
+        # 2. Chế độ tự động theo thời gian
+        self.auto_image_layout = QHBoxLayout()
+        self.time_per_image_label = QLabel("Thời gian cho mỗi hình:", self)
+        self.time_per_image_value = QLineEdit("60", self)  # Mặc định 60 giây
+        self.time_per_image_value.setFixedWidth(50)
+        self.time_per_image_unit = QComboBox(self)
+        self.time_per_image_unit.addItem("giây", 1)
+        self.time_per_image_unit.addItem("phút", 60)
+
+        self.auto_image_layout.addWidget(self.time_per_image_label)
+        self.auto_image_layout.addWidget(self.time_per_image_value)
+        self.auto_image_layout.addWidget(self.time_per_image_unit)
+
+        # Thêm cả hai chế độ vào container
+        self.image_settings_container.addLayout(self.fixed_image_layout)
+        self.image_settings_container.addLayout(self.auto_image_layout)
+
+        # Thêm container vào layout chính
+        story_layout.addLayout(self.image_settings_container)
+
+        # Khởi tạo trạng thái hiển thị
+        self.toggle_image_mode(self.auto_images_checkbox.isChecked())
 
         # Set up story group
         story_group.setLayout(story_layout)
@@ -301,6 +343,18 @@ class MainWindow(QMainWindow):
                 # Khôi phục lại danh sách mặc định
                 self.update_voice_list()
 
+    def toggle_image_mode(self, auto_mode):
+        """Chuyển đổi giữa chế độ số lượng hình cố định và tự động theo thời gian"""
+        # Hiển thị/ẩn các widget phù hợp dựa trên chế độ
+        # Ẩn hoặc hiện thị widgets cho chế độ số lượng hình cố định
+        self.image_count_combobox.setVisible(not auto_mode)
+        self.fixed_image_layout.itemAt(0).widget().setVisible(not auto_mode)  # Label
+
+        # Ẩn hoặc hiện thị widgets cho chế độ tự động theo thời gian
+        self.time_per_image_label.setVisible(auto_mode)
+        self.time_per_image_value.setVisible(auto_mode)
+        self.time_per_image_unit.setVisible(auto_mode)
+
     def generate_all(self, story):
         base = "output"
         os.makedirs(base, exist_ok=True)
@@ -311,7 +365,9 @@ class MainWindow(QMainWindow):
         timing_path = os.path.join(base, "timings.json")
 
         # Get Leonardo AI API key
-        leonardo_api_key = self.leonardo_key_input.text().strip()
+        leonardo_api_key = (
+            self.leonardo_key_input.text().strip() or self.api_leonardo_key
+        )
 
         # Check if translation is needed
         if self.translate_checkbox.isChecked():
@@ -373,14 +429,39 @@ class MainWindow(QMainWindow):
 
         # 2. Image(s)
         self.status_label.setText("Đang tạo hình ảnh...")
-        QApplication.processEvents()
+        QApplication.processEvents()  # Số lượng hình ảnh được chọn
+        if self.auto_images_checkbox.isChecked():
+            # Tự động tạo hình theo thời gian
+            try:
+                from modules.video_gen import get_audio_duration
 
-        # Số lượng hình ảnh được chọn
-        image_count = self.image_count_combobox.currentData()
+                audio_duration = get_audio_duration(audio_path)
+                time_per_image = float(self.time_per_image_value.text())
+                time_unit = self.time_per_image_unit.currentData()
+                time_per_image_seconds = time_per_image * time_unit
 
-        if image_count <= 1:
+                # Tính số lượng hình ảnh dựa trên thời lượng audio
+                total_images = max(1, int(audio_duration / time_per_image_seconds))
+
+                unit_name = "giây" if time_unit == 1 else "phút"
+                self.status_label.setText(
+                    f"Audio dài {audio_duration:.1f} giây, tạo {total_images} hình (mỗi {time_per_image} {unit_name})"
+                )
+                QApplication.processEvents()
+            except Exception as e:
+                self.status_label.setText(f"Lỗi khi tính toán thời gian: {str(e)}")
+                QMessageBox.warning(
+                    self,
+                    "Lỗi tạo hình ảnh",
+                    f"Không thể tính toán thời gian: {str(e)}",
+                )
+                total_images = 1
+        else:
+            total_images = self.image_count_combobox.currentData()
+
+        if total_images <= 1:
             # Tạo một hình duy nhất
-            generate_image_from_story(story, img_path, leonardo_api_key or self.api_key)
+            generate_image_from_story(story, img_path, leonardo_api_key)
 
             # 3. Subtitle (với dữ liệu timing)
             self.status_label.setText("Đang tạo phụ đề đồng bộ với audio...")
@@ -396,7 +477,7 @@ class MainWindow(QMainWindow):
         else:
             # Tạo nhiều hình ảnh
             self.status_label.setText(
-                f"Đang tạo {image_count} hình ảnh cho các phân đoạn truyện..."
+                f"Đang tạo {total_images} hình ảnh cho các phân đoạn truyện..."
             )
             QApplication.processEvents()
 
@@ -414,7 +495,7 @@ class MainWindow(QMainWindow):
 
                 # Phân đoạn truyện và tạo hình ảnh
                 image_paths = process_story_for_images(
-                    story, image_count, segments_dir, leonardo_api_key or self.api_key
+                    story, total_images, segments_dir, leonardo_api_key
                 )
 
                 # 3. Subtitle (với dữ liệu timing)
@@ -442,9 +523,7 @@ class MainWindow(QMainWindow):
                 # Thử lại với một hình duy nhất
                 self.status_label.setText("Thử tạo video với một hình đơn...")
                 QApplication.processEvents()
-                generate_image_from_story(
-                    story, img_path, leonardo_api_key or self.api_key
-                )
+                generate_image_from_story(story, img_path, leonardo_api_key)
 
                 from modules.video_gen import create_video
 

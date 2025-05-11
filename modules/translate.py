@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class DeepseekTranslator:
     """Class to handle translation from Chinese to Vietnamese using Deepseek API"""
 
-    def __init__(self, api_key):
+    def __init__(self, api_key="sk-b24c10868fa54902b565be1001666bfe"):
         """Initialize the translator with the API key"""
         self.api_key = api_key
         self.api_url = "https://api.deepseek.com/v1/chat/completions"
