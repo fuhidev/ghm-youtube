@@ -56,7 +56,9 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Vui lòng nhập truyện!")
             return
         self.status_label.setText("Đang xử lý...")
-        self.generate_all(story)    def handle_schedule(self):
+        self.generate_all(story)
+
+    def handle_schedule(self):
         story = self.story_input.toPlainText().strip()
         if not story:
             QMessageBox.warning(self, "Lỗi", "Vui lòng nhập truyện!")
