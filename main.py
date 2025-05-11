@@ -76,7 +76,7 @@ class MainWindow(QMainWindow):
         translate_layout.addWidget(self.translate_checkbox)
         story_layout.addLayout(translate_layout)
 
-        # API key input
+        # API key input for Deepseek
         api_key_layout = QHBoxLayout()
         api_key_label = QLabel("Deepseek API Key:", self)
         self.api_key_input = QLineEdit(self)
@@ -86,6 +86,28 @@ class MainWindow(QMainWindow):
         api_key_layout.addWidget(api_key_label)
         api_key_layout.addWidget(self.api_key_input)
         story_layout.addLayout(api_key_layout)
+
+        # Leonardo AI Key input
+        leonardo_key_layout = QHBoxLayout()
+        leonardo_key_label = QLabel("Leonardo AI Key:", self)
+        self.leonardo_key_input = QLineEdit(self)
+        self.leonardo_key_input.setPlaceholderText(
+            "Nhập Leonardo.ai API key để tạo hình"
+        )
+        self.leonardo_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        leonardo_key_layout.addWidget(leonardo_key_label)
+        leonardo_key_layout.addWidget(self.leonardo_key_input)
+        story_layout.addLayout(leonardo_key_layout)
+
+        # Image options
+        image_options_layout = QHBoxLayout()
+        image_count_label = QLabel("Số lượng hình ảnh:", self)
+        self.image_count_combobox = QComboBox(self)
+        for i in range(1, 11):  # 1 đến 10 hình
+            self.image_count_combobox.addItem(f"{i} hình", i)
+        image_options_layout.addWidget(image_count_label)
+        image_options_layout.addWidget(self.image_count_combobox)
+        story_layout.addLayout(image_options_layout)
 
         # Set up story group
         story_group.setLayout(story_layout)
@@ -215,25 +237,6 @@ class MainWindow(QMainWindow):
         self.status_label.setText("Đang xử lý...")
         self.generate_all(story)
 
-    # def handle_schedule(self):
-    #     story = self.story_input.toPlainText().strip()
-    #     if not story:
-    #         QMessageBox.warning(self, "Lỗi", "Vui lòng nhập truyện!")
-    #         return
-
-    #     # Check translation option
-    #     if self.translation_checkbox.isChecked():
-    #         story = translate_chinese_to_vietnamese(story)
-
-    #     # run_time = self.datetime_edit.dateTime().toPyDateTime()
-    #     # if run_time < datetime.datetime.now():
-    #     #     QMessageBox.warning(self, "Lỗi", "Thời gian phải ở tương lai!")
-    #     #     return
-    #     # schedule_task(self.generate_all, run_time, story)
-    #     # QMessageBox.information(
-    #     #     self, "Đặt lịch", f"Đã đặt lịch tạo video lúc {run_time}"
-    #     # )
-
     def update_voice_list(self):
         # Lưu lại voice ID đã chọn (nếu có)
         current_voice = self.voice_combobox.currentData()
@@ -307,6 +310,9 @@ class MainWindow(QMainWindow):
         sub_path = os.path.join(base, "subtitle.ass")
         timing_path = os.path.join(base, "timings.json")
 
+        # Get Leonardo AI API key
+        leonardo_api_key = self.leonardo_key_input.text().strip()
+
         # Check if translation is needed
         if self.translate_checkbox.isChecked():
             self.status_label.setText("Đang dịch từ tiếng Trung sang tiếng Việt...")
@@ -365,20 +371,84 @@ class MainWindow(QMainWindow):
             voice=selected_voice,
         )
 
-        # 2. Image
+        # 2. Image(s)
         self.status_label.setText("Đang tạo hình ảnh...")
         QApplication.processEvents()
-        generate_image_from_story(story, img_path)
 
-        # 3. Subtitle (với dữ liệu timing)
-        self.status_label.setText("Đang tạo phụ đề đồng bộ với audio...")
-        QApplication.processEvents()
-        create_subtitle(story, sub_path, word_timings=word_timings)
+        # Số lượng hình ảnh được chọn
+        image_count = self.image_count_combobox.currentData()
 
-        # 4. Video với phụ đề
-        self.status_label.setText("Đang tạo video và gắn phụ đề...")
-        QApplication.processEvents()
-        create_video(img_path, audio_path, video_path, sub_path)
+        if image_count <= 1:
+            # Tạo một hình duy nhất
+            generate_image_from_story(story, img_path, leonardo_api_key or self.api_key)
+
+            # 3. Subtitle (với dữ liệu timing)
+            self.status_label.setText("Đang tạo phụ đề đồng bộ với audio...")
+            QApplication.processEvents()
+            create_subtitle(story, sub_path, word_timings=word_timings)
+
+            # 4. Video với phụ đề
+            self.status_label.setText("Đang tạo video và gắn phụ đề...")
+            QApplication.processEvents()
+            from modules.video_gen import create_video
+
+            create_video(img_path, audio_path, video_path, sub_path)
+        else:
+            # Tạo nhiều hình ảnh
+            self.status_label.setText(
+                f"Đang tạo {image_count} hình ảnh cho các phân đoạn truyện..."
+            )
+            QApplication.processEvents()
+
+            # Tạo nhiều hình ảnh
+            segments_dir = os.path.join(base, "segment_images")
+            os.makedirs(segments_dir, exist_ok=True)
+
+            try:
+                # Import các module cần thiết
+                from modules.story_segment import process_story_for_images
+                from modules.video_gen import (
+                    create_video_with_segments,
+                    get_audio_duration,
+                )
+
+                # Phân đoạn truyện và tạo hình ảnh
+                image_paths = process_story_for_images(
+                    story, image_count, segments_dir, leonardo_api_key or self.api_key
+                )
+
+                # 3. Subtitle (với dữ liệu timing)
+                self.status_label.setText("Đang tạo phụ đề đồng bộ với audio...")
+                QApplication.processEvents()
+                create_subtitle(story, sub_path, word_timings=word_timings)
+
+                # 4. Video với phụ đề từ nhiều hình ảnh
+                self.status_label.setText(
+                    f"Đang tạo video từ {len(image_paths)} hình ảnh và gắn phụ đề..."
+                )
+                QApplication.processEvents()
+
+                create_video_with_segments(
+                    image_paths, audio_path, video_path, sub_path
+                )
+            except Exception as e:
+                self.status_label.setText(f"Lỗi khi tạo video từ nhiều hình: {str(e)}")
+                QMessageBox.warning(
+                    self,
+                    "Lỗi tạo video",
+                    f"Không thể tạo video từ nhiều hình: {str(e)}",
+                )
+
+                # Thử lại với một hình duy nhất
+                self.status_label.setText("Thử tạo video với một hình đơn...")
+                QApplication.processEvents()
+                generate_image_from_story(
+                    story, img_path, leonardo_api_key or self.api_key
+                )
+
+                from modules.video_gen import create_video
+
+                create_video(img_path, audio_path, video_path, sub_path)
 
         self.status_label.setText(f"Đã tạo video: {video_path}")
 

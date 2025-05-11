@@ -2,6 +2,17 @@
 # Tạo video từ hình ảnh và audio
 import ffmpeg
 import os
+import json
+import logging
+from typing import List, Optional
+from pydub import AudioSegment
+import math
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 def create_video(image_path, audio_path, output_path, subtitle_path=None):
@@ -122,3 +133,186 @@ def create_video(image_path, audio_path, output_path, subtitle_path=None):
         except:
             pass
     return output_path
+
+
+def create_video_with_segments(
+    image_paths: List[str], audio_path: str, output_path: str, subtitle_path=None
+):
+    """
+    Tạo video từ nhiều hình ảnh và audio, với mỗi hình ảnh hiển thị trong một phần của audio
+
+    Args:
+        image_paths (List[str]): Danh sách đường dẫn đến các hình ảnh
+        audio_path (str): Đường dẫn đến file audio
+        output_path (str): Đường dẫn để lưu video đầu ra
+        subtitle_path (str, optional): Đường dẫn đến file phụ đề
+
+    Returns:
+        str: Đường dẫn đến video đã tạo
+    """
+    # Lọc bỏ các đường dẫn hình ảnh không tồn tại
+    valid_image_paths = [path for path in image_paths if path and os.path.exists(path)]
+
+    if not valid_image_paths:
+        logger.error("Không có hình ảnh hợp lệ để tạo video")
+        # Nếu không có hình ảnh hợp lệ, sử dụng hàm tạo video từ một hình ảnh
+        if len(image_paths) > 0 and os.path.exists(image_paths[0]):
+            return create_video(image_paths[0], audio_path, output_path, subtitle_path)
+        return None
+
+    # Lấy độ dài audio
+    probe = ffmpeg.probe(audio_path)
+    total_duration = float(probe["format"]["duration"])
+
+    # Tính thời gian cho mỗi hình ảnh
+    segment_duration = total_duration / len(valid_image_paths)
+
+    # Tạo file danh sách hình ảnh cho ffmpeg
+    concat_file_path = os.path.join(os.path.dirname(output_path), "concat_list.txt")
+
+    with open(concat_file_path, "w", encoding="utf-8") as f:
+        for img_path in valid_image_paths:
+            # Định dạng đường dẫn cho ffmpeg
+            img_path_escaped = img_path.replace("\\", "/")
+            f.write(f"file '{img_path_escaped}'\n")
+            f.write(f"duration {segment_duration}\n")
+
+        # Thêm hình ảnh cuối cùng một lần nữa với duration 0 để tránh lỗi
+        img_path_escaped = valid_image_paths[-1].replace("\\", "/")
+        f.write(f"file '{img_path_escaped}'\n")
+
+    # Tạo video từ danh sách hình ảnh (không có audio)
+    temp_video_no_audio = output_path + ".temp_no_audio.mp4"
+
+    try:
+        # Sử dụng ffmpeg để tạo video từ danh sách hình ảnh
+        (
+            ffmpeg.input(concat_file_path, format="concat", safe=0)
+            .output(temp_video_no_audio, vcodec="libx264", pix_fmt="yuv420p", r=24)
+            .run(overwrite_output=True)
+        )
+
+        # Thêm audio vào video
+        temp_video = output_path + ".temp.mp4"
+        input_video = ffmpeg.input(temp_video_no_audio)
+        input_audio = ffmpeg.input(audio_path)
+
+        (
+            ffmpeg.output(
+                input_video,
+                input_audio,
+                temp_video,
+                vcodec="copy",
+                acodec="aac",
+                shortest=None,
+            ).run(overwrite_output=True)
+        )
+
+        # Tiếp tục với phần xử lý phụ đề như trong hàm create_video
+        if subtitle_path and os.path.exists(subtitle_path):
+            video_with_subtitles = ffmpeg.input(temp_video)
+
+            # Kiểm tra xem file phụ đề có dữ liệu không
+            with open(subtitle_path, "r", encoding="utf-8") as f:
+                subtitle_content = f.read()
+
+            if not subtitle_content.strip():
+                logger.warning(f"File phụ đề rỗng: {subtitle_path}")
+                # Kiểm tra và xử lý nếu file đích đã tồn tại
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                os.rename(temp_video, output_path)
+
+                # Dọn dẹp file tạm
+                if os.path.exists(temp_video_no_audio):
+                    os.remove(temp_video_no_audio)
+                if os.path.exists(concat_file_path):
+                    os.remove(concat_file_path)
+
+                return output_path
+
+            # Sử dụng đường dẫn tuyệt đối cho Windows
+            import pathlib
+
+            subtitle_absolute_path = pathlib.Path(subtitle_path).absolute()
+
+            # Escape đường dẫn phụ đề cho ffmpeg theo cách đảm bảo hoạt động trên Windows
+            subtitle_path_escaped = (
+                str(subtitle_absolute_path).replace("\\", "/").replace(":", "\\:")
+            )
+
+            # Sử dụng subtitles filter với các tùy chọn để phụ đề lớn, đậm, màu trắng viền xanh, ở giữa
+            subtitle_options = f"force_style='Fontname=Arial,Fontsize=28,PrimaryColour=&HFFFFFF,OutlineColour=&H0000FF,BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=35'"
+
+            try:
+                # Kiểm tra và xóa file đích nếu đã tồn tại
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+
+                # Sử dụng vf=subtitles trực tiếp
+                (
+                    ffmpeg.output(
+                        video_with_subtitles,
+                        output_path,
+                        vf=f"subtitles='{subtitle_path_escaped}':{subtitle_options}",
+                        vcodec="libx264",
+                        acodec="copy",
+                    ).run(overwrite_output=True)
+                )
+            except Exception as e:
+                logger.error(f"Lỗi khi thêm phụ đề: {str(e)}")
+
+                # Sử dụng video không có phụ đề
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+                os.rename(temp_video, output_path)
+        else:
+            # Không có phụ đề, sử dụng video đã có
+            if os.path.exists(output_path):
+                os.remove(output_path)
+            os.rename(temp_video, output_path)
+
+        # Dọn dẹp file tạm
+        if os.path.exists(temp_video):
+            os.remove(temp_video)
+        if os.path.exists(temp_video_no_audio):
+            os.remove(temp_video_no_audio)
+        if os.path.exists(concat_file_path):
+            os.remove(concat_file_path)
+
+        logger.info(f"Đã tạo video từ {len(valid_image_paths)} hình ảnh: {output_path}")
+        return output_path
+
+    except Exception as e:
+        logger.error(f"Lỗi khi tạo video từ nhiều hình ảnh: {str(e)}")
+
+        # Nếu có lỗi, thử tạo video từ hình ảnh đầu tiên
+        if valid_image_paths:
+            logger.info("Thử tạo video với hình ảnh đầu tiên...")
+            return create_video(
+                valid_image_paths[0], audio_path, output_path, subtitle_path
+            )
+        return None
+
+
+def get_audio_duration(audio_path):
+    """
+    Lấy độ dài của file audio
+
+    Args:
+        audio_path (str): Đường dẫn đến file audio
+
+    Returns:
+        float: Độ dài của file audio (đơn vị: giây)
+    """
+    try:
+        probe = ffmpeg.probe(audio_path)
+        return float(probe["format"]["duration"])
+    except Exception:
+        # Nếu ffprobe không hoạt động, thử với pydub
+        try:
+            audio = AudioSegment.from_file(audio_path)
+            return len(audio) / 1000.0  # Chuyển từ mili giây sang giây
+        except Exception as e:
+            logger.error(f"Không thể lấy độ dài audio: {str(e)}")
+            return 0
