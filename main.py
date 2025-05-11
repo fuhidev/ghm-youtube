@@ -126,10 +126,62 @@ class MainWindow(QMainWindow):
         self.refresh_voices_btn.clicked.connect(self.update_voice_list)
         self.lang_combobox.currentIndexChanged.connect(self.update_voice_list)
 
+        # Connect input type signals
+        self.input_direct_btn.clicked.connect(self.toggle_input_mode)
+        self.input_file_btn.clicked.connect(self.toggle_input_mode)
+        self.browse_file_btn.clicked.connect(self.browse_story_file)
+
+        # Initialize UI state
+        self.current_file_path = ""
+        self.toggle_input_mode()
+
+    def toggle_input_mode(self):
+        # Nếu chế độ chọn file được chọn
+        if self.sender() == self.input_file_btn or self.input_file_btn.isChecked():
+            self.input_direct_btn.setChecked(False)
+            self.input_file_btn.setChecked(True)
+            self.file_path_label.setVisible(True)
+            self.browse_file_btn.setVisible(True)
+            self.file_selection_layout.setVisible(True)
+            self.story_input.setReadOnly(True)
+            self.story_input.setStyleSheet("background-color: #f0f0f0;")
+            if self.current_file_path:
+                self.load_story_from_file(self.current_file_path)
+        # Nếu chế độ nhập trực tiếp được chọn
+        else:
+            self.input_direct_btn.setChecked(True)
+            self.input_file_btn.setChecked(False)
+            self.file_path_label.setVisible(False)
+            self.browse_file_btn.setVisible(False)
+            self.file_selection_layout.setVisible(False)
+            self.story_input.setReadOnly(False)
+            self.story_input.setStyleSheet("")
+
+    def browse_story_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Chọn file truyện", "", "Text Files (*.txt);;All Files (*)"
+        )
+        if file_path:
+            self.current_file_path = file_path
+            self.file_path_label.setText(os.path.basename(file_path))
+            self.load_story_from_file(file_path)
+
+    def load_story_from_file(self, file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                content = file.read()
+                self.story_input.setText(content)
+                self.status_label.setText(
+                    f"Đã tải truyện từ file: {os.path.basename(file_path)}"
+                )
+        except Exception as e:
+            self.status_label.setText(f"Lỗi khi đọc file: {str(e)}")
+            QMessageBox.warning(self, "Lỗi đọc file", f"Không thể đọc file: {str(e)}")
+
     def handle_generate(self):
         story = self.story_input.toPlainText().strip()
         if not story:
-            self.status_label.setText("Vui lòng nhập truyện!")
+            self.status_label.setText("Vui lòng nhập truyện hoặc chọn file!")
             return
         self.status_label.setText("Đang xử lý...")
         self.generate_all(story)
@@ -167,15 +219,16 @@ class MainWindow(QMainWindow):
             self.voice_combobox.addItem("Nữ - Aria (en-US)", "en-US-AriaNeural")
             self.voice_combobox.addItem("Nam - Guy (en-US)", "en-US-GuyNeural")
             self.voice_combobox.addItem("Nữ - Jenny (en-US)", "en-US-JennyNeural")
-            self.voice_combobox.addItem("Nam - Jason (en-US)", "en-US-JasonNeural")
-
-        # Khôi phục lại lựa chọn cũ nếu có trong danh sách mới
+            self.voice_combobox.addItem(
+                "Nam - Jason (en-US)", "en-US-JasonNeural"
+            )  # Khôi phục lại lựa chọn cũ nếu có trong danh sách mới
         if current_voice:
             index = self.voice_combobox.findData(current_voice)
             if index >= 0:
                 self.voice_combobox.setCurrentIndex(index)
 
-            # Nếu muốn tải đầy đủ danh sách giọng từ Edge TTS (có thể mất thời gian)        if self.sender() == self.refresh_voices_btn:
+        # Nếu muốn tải đầy đủ danh sách giọng từ Edge TTS (có thể mất thời gian)
+        if self.sender() == self.refresh_voices_btn:
             self.status_label.setText("Đang tải danh sách giọng từ Edge TTS...")
             QApplication.processEvents()
             try:
