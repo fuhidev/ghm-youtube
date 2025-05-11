@@ -88,6 +88,78 @@ class DeepseekTranslator:
         logger.error("All translation attempts failed")
         raise Exception("Failed to translate text using Deepseek API")
 
+    def translate_long_text(
+        self,
+        text,
+        source_lang="Chinese",
+        target_lang="Vietnamese",
+        chunk_size=1500,
+        retries=3,
+        delay=2,
+    ):
+        """
+        Translate long text by breaking it into manageable chunks
+
+        Args:
+            text (str): The long text to translate
+            source_lang (str): Source language
+            target_lang (str): Target language
+            chunk_size (int): Approximate size of each chunk in characters
+            retries (int): Number of retries for API calls
+            delay (int): Delay between retries
+
+        Returns:
+            str: Complete translated text
+        """
+        if not text or not text.strip():
+            return ""
+
+        # If text is short enough, translate it directly
+        if len(text) <= chunk_size:
+            return self.translate(text, source_lang, target_lang, retries, delay)
+
+        logger.info(
+            f"Text length ({len(text)} chars) exceeds chunk size. Breaking into chunks."
+        )
+
+        # Split text into paragraphs
+        paragraphs = text.split("\n")
+        chunks = []
+        current_chunk = []
+        current_length = 0
+
+        # Group paragraphs into chunks of appropriate size
+        for para in paragraphs:
+            if current_length + len(para) > chunk_size and current_chunk:
+                # If adding this paragraph exceeds chunk size, save current chunk
+                chunks.append("\n".join(current_chunk))
+                current_chunk = [para]
+                current_length = len(para)
+            else:
+                # Add paragraph to current chunk
+                current_chunk.append(para)
+                current_length += len(para)
+
+        # Add the last chunk if it exists
+        if current_chunk:
+            chunks.append("\n".join(current_chunk))
+
+        # Translate each chunk
+        translated_chunks = []
+        for i, chunk in enumerate(chunks):
+            logger.info(f"Translating chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
+            translated_chunk = self.translate(
+                chunk, source_lang, target_lang, retries, delay
+            )
+            translated_chunks.append(translated_chunk)
+
+            # Add delay between chunk translations to avoid rate limiting
+            if i < len(chunks) - 1:
+                time.sleep(delay)
+
+        # Join the translated chunks
+        return "\n".join(translated_chunks)
+
 
 def translate_chinese_to_vietnamese(text, api_key):
     """
@@ -101,7 +173,7 @@ def translate_chinese_to_vietnamese(text, api_key):
         str: The translated Vietnamese text
     """
     translator = DeepseekTranslator(api_key)
-    return translator.translate(text)
+    return translator.translate_long_text(text)
 
 
 # For testing the module
