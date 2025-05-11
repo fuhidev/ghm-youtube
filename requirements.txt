@@ -1,0 +1,7 @@
+PyQt6
+ffmpeg-python
+gTTS
+pysubs2
+APScheduler
+requests
+Pillow
