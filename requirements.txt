@@ -5,3 +5,5 @@ pysubs2
 APScheduler
 requests
 Pillow
+edge-tts
+pydub

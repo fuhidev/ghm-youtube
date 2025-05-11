@@ -52,16 +52,32 @@ def create_timed_subtitles(subs, word_timings, words_per_line, color, output_pat
 
     current_words = []
     line_start = 0
+    
+    # Kiểm tra xem word_timings có dữ liệu không
+    if not word_timings or len(word_timings) == 0:
+        print("Không có dữ liệu timing cho phụ đề")
+        return
+    
+    # In ra một số dữ liệu timing để debug
+    print(f"Số lượng word_timings: {len(word_timings)}")
+    print(f"Sample word timing: {word_timings[0] if word_timings else 'None'}")
 
     for i, word_timing in enumerate(word_timings):
+        if "word" not in word_timing:
+            print(f"Thiếu trường 'word' trong word_timing: {word_timing}")
+            continue
+            
         current_words.append(word_timing["word"])
 
         # Khi đủ số từ cho một dòng hoặc là từ cuối cùng
         if len(current_words) == words_per_line or i == len(word_timings) - 1:
             line_text = " ".join(current_words)
-            line_end = word_timing[
-                "end"
-            ]  # Format text với style đặc biệt (giống karaoke) - canh giữa dưới
+            
+            if "end" not in word_timing:
+                print(f"Thiếu trường 'end' trong word_timing: {word_timing}")
+                continue
+                
+            line_end = word_timing["end"]  # Format text với style đặc biệt (giống karaoke) - canh giữa dưới
             formatted_line = (
                 "{\\an2}{\\fs48}{\\b1}{\\c&HFFFFFF&}{\\3c&H00AAFF&}{\\3a&H00&}{\\4a&HFF&}"
                 + line_text
