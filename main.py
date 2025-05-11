@@ -16,12 +16,15 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QComboBox,
     QGroupBox,
+    QLineEdit,
+    QCheckBox,
 )
 from modules.tts import text_to_speech
 from modules.image_gen import generate_image_from_story
 from modules.video_gen import create_video
 from modules.subtitle import create_subtitle
 from modules.scheduler import schedule_task
+from modules.translate import translate_chinese_to_vietnamese
 
 
 class MainWindow(QMainWindow):
@@ -29,6 +32,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("GHM-Youtube")
         self.setGeometry(100, 100, 800, 600)
+        self.api_key = "sk-b24c10868fa54902b565be1001666bfe"  # Default API key
         self.init_ui()
 
     def init_ui(self):
@@ -65,6 +69,23 @@ class MainWindow(QMainWindow):
             "Mấy bông tuyết rơi lên bệ cửa sổ quán rượu ven đường - nơi trú chân duy nhất trong mười dặm giữa cơn bão tuyết."
         )
         story_layout.addWidget(self.story_input)
+
+        # Translation options
+        translate_layout = QHBoxLayout()
+        self.translate_checkbox = QCheckBox("Dịch từ tiếng Trung sang tiếng Việt", self)
+        translate_layout.addWidget(self.translate_checkbox)
+        story_layout.addLayout(translate_layout)
+
+        # API key input
+        api_key_layout = QHBoxLayout()
+        api_key_label = QLabel("Deepseek API Key:", self)
+        self.api_key_input = QLineEdit(self)
+        self.api_key_input.setText(self.api_key)
+        self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key_input.textChanged.connect(self.update_api_key)
+        api_key_layout.addWidget(api_key_label)
+        api_key_layout.addWidget(self.api_key_input)
+        story_layout.addLayout(api_key_layout)
 
         # Set up story group
         story_group.setLayout(story_layout)
@@ -106,14 +127,14 @@ class MainWindow(QMainWindow):
 
         # Generate buttons
         self.generate_btn = QPushButton("Tạo Video", self)
-        self.schedule_btn = QPushButton("Đặt lịch tạo Video", self)
-        self.datetime_edit = QDateTimeEdit(self)
-        self.datetime_edit.setCalendarPopup(True)
+        # self.schedule_btn = QPushButton("Đặt lịch tạo Video", self)
+        # self.datetime_edit = QDateTimeEdit(self)
+        # self.datetime_edit.setCalendarPopup(True)
         self.status_label = QLabel("Trạng thái: Chờ nhập truyện", self)
 
         layout.addWidget(self.generate_btn)
-        layout.addWidget(self.schedule_btn)
-        layout.addWidget(self.datetime_edit)
+        # layout.addWidget(self.schedule_btn)
+        # layout.addWidget(self.datetime_edit)
         layout.addWidget(self.status_label)
 
         container = QWidget()
@@ -122,7 +143,7 @@ class MainWindow(QMainWindow):
 
         # Connect signals
         self.generate_btn.clicked.connect(self.handle_generate)
-        self.schedule_btn.clicked.connect(self.handle_schedule)
+        # self.schedule_btn.clicked.connect(self.handle_schedule)
         self.refresh_voices_btn.clicked.connect(self.update_voice_list)
         self.lang_combobox.currentIndexChanged.connect(self.update_voice_list)
 
@@ -189,22 +210,29 @@ class MainWindow(QMainWindow):
         if not story:
             self.status_label.setText("Vui lòng nhập truyện hoặc chọn file!")
             return
+
+        # Removed duplicate translation here as it's handled in generate_all
         self.status_label.setText("Đang xử lý...")
         self.generate_all(story)
 
-    def handle_schedule(self):
-        story = self.story_input.toPlainText().strip()
-        if not story:
-            QMessageBox.warning(self, "Lỗi", "Vui lòng nhập truyện!")
-            return
-        run_time = self.datetime_edit.dateTime().toPyDateTime()
-        if run_time < datetime.datetime.now():
-            QMessageBox.warning(self, "Lỗi", "Thời gian phải ở tương lai!")
-            return
-        schedule_task(self.generate_all, run_time, story)
-        QMessageBox.information(
-            self, "Đặt lịch", f"Đã đặt lịch tạo video lúc {run_time}"
-        )
+    # def handle_schedule(self):
+    #     story = self.story_input.toPlainText().strip()
+    #     if not story:
+    #         QMessageBox.warning(self, "Lỗi", "Vui lòng nhập truyện!")
+    #         return
+
+    #     # Check translation option
+    #     if self.translation_checkbox.isChecked():
+    #         story = translate_chinese_to_vietnamese(story)
+
+    #     # run_time = self.datetime_edit.dateTime().toPyDateTime()
+    #     # if run_time < datetime.datetime.now():
+    #     #     QMessageBox.warning(self, "Lỗi", "Thời gian phải ở tương lai!")
+    #     #     return
+    #     # schedule_task(self.generate_all, run_time, story)
+    #     # QMessageBox.information(
+    #     #     self, "Đặt lịch", f"Đã đặt lịch tạo video lúc {run_time}"
+    #     # )
 
     def update_voice_list(self):
         # Lưu lại voice ID đã chọn (nếu có)
@@ -279,9 +307,50 @@ class MainWindow(QMainWindow):
         sub_path = os.path.join(base, "subtitle.ass")
         timing_path = os.path.join(base, "timings.json")
 
+        # Check if translation is needed
+        if self.translate_checkbox.isChecked():
+            self.status_label.setText("Đang dịch từ tiếng Trung sang tiếng Việt...")
+            QApplication.processEvents()
+            try:
+                # Save the original Chinese story
+                original_story = story
+                chinese_path = os.path.join(base, "original_chinese.txt")
+                with open(chinese_path, "w", encoding="utf-8") as f:
+                    f.write(original_story)
+
+                # Translate the story
+                story = translate_chinese_to_vietnamese(original_story, self.api_key)
+
+                # Save the translated story
+                vietnamese_path = os.path.join(base, "translated_vietnamese.txt")
+                with open(vietnamese_path, "w", encoding="utf-8") as f:
+                    f.write(story)
+
+                self.status_label.setText("Đã dịch xong tiếng Trung sang tiếng Việt")
+                QApplication.processEvents()
+
+            except Exception as e:
+                self.status_label.setText(f"Lỗi khi dịch: {str(e)}")
+                QMessageBox.critical(
+                    self, "Lỗi dịch thuật", f"Không thể dịch văn bản: {str(e)}"
+                )
+                return
+
         # Lấy giọng đọc được chọn
         selected_voice = self.voice_combobox.currentData()
         selected_lang = self.lang_combobox.currentData()
+
+        # Ensure Vietnamese language is selected for translated content
+        if self.translate_checkbox.isChecked():
+            selected_lang = "vi"
+            # Find a Vietnamese voice if current voice is not Vietnamese
+            if not selected_voice.startswith("vi-"):
+                # Set to default Vietnamese voice
+                for i in range(self.voice_combobox.count()):
+                    if self.voice_combobox.itemData(i).startswith("vi-"):
+                        self.voice_combobox.setCurrentIndex(i)
+                        selected_voice = self.voice_combobox.currentData()
+                        break
 
         # 1. TTS (với ước tính thời gian)
         self.status_label.setText(
@@ -312,6 +381,10 @@ class MainWindow(QMainWindow):
         create_video(img_path, audio_path, video_path, sub_path)
 
         self.status_label.setText(f"Đã tạo video: {video_path}")
+
+    def update_api_key(self):
+        """Update the API key when the input changes"""
+        self.api_key = self.api_key_input.text().strip()
 
 
 if __name__ == "__main__":

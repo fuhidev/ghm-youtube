@@ -1,0 +1,15 @@
+﻿= : The term '=' is not recognized as the name of a cmdlet, function, script file, or operable program. Check the spelling of the name, or if a path was 
+included, verify that the path is correct and try again.
+At line:1 char:2
++  = Get-Content -Path 'd:\1.Programing\1. BHitTech\youtube-tool\main.p ...
++  ~
+    + CategoryInfo          : ObjectNotFound: (=:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+Cannot find an overload for "GetBytes" and the argument count: "0".
+At line:1 char:79
++ ... n.py' -Raw; [System.Text.Encoding]::UTF8.GetString([System.Text.Encod ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodException
+    + FullyQualifiedErrorId : MethodCountCouldNotFindBest
+ 
