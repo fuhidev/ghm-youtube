@@ -133,29 +133,33 @@ class MainWindow(QMainWindow):
 
         # Initialize UI state
         self.current_file_path = ""
-        self.toggle_input_mode()
+        self.update_input_mode(direct=True)  # Initialize with direct input mode
 
     def toggle_input_mode(self):
-        # Nếu chế độ chọn file được chọn
-        if self.sender() == self.input_file_btn or self.input_file_btn.isChecked():
-            self.input_direct_btn.setChecked(False)
-            self.input_file_btn.setChecked(True)
-            self.file_path_label.setVisible(True)
-            self.browse_file_btn.setVisible(True)
-            # self.file_selection_layout.setVisible(True)
-            self.story_input.setReadOnly(True)
-            self.story_input.setStyleSheet("background-color: #f0f0f0;")
-            if self.current_file_path:
-                self.load_story_from_file(self.current_file_path)
-        # Nếu chế độ nhập trực tiếp được chọn
-        else:
-            self.input_direct_btn.setChecked(True)
-            self.input_file_btn.setChecked(False)
-            self.file_path_label.setVisible(False)
-            self.browse_file_btn.setVisible(False)
-            # self.file_selection_layout.setVisible(False)
+        # If the sender is input_file_btn or it's already checked, switch to file mode
+        if self.sender() == self.input_file_btn:
+            self.update_input_mode(direct=False)
+        # If the sender is input_direct_btn or it's already checked, switch to direct mode
+        elif self.sender() == self.input_direct_btn:
+            self.update_input_mode(direct=True)
+
+    def update_input_mode(self, direct=True):
+        # Update button states
+        self.input_direct_btn.setChecked(direct)
+        self.input_file_btn.setChecked(not direct)
+
+        # Update UI elements based on mode
+        self.file_path_label.setVisible(not direct)
+        self.browse_file_btn.setVisible(not direct)
+
+        # Update text field properties
+        if direct:
             self.story_input.setReadOnly(False)
             self.story_input.setStyleSheet("")
+        else:
+            self.story_input.setReadOnly(True)
+            if self.current_file_path:
+                self.load_story_from_file(self.current_file_path)
 
     def browse_story_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -165,6 +169,8 @@ class MainWindow(QMainWindow):
             self.current_file_path = file_path
             self.file_path_label.setText(os.path.basename(file_path))
             self.load_story_from_file(file_path)
+            # Ensure we're in file mode after browsing
+            self.update_input_mode(direct=False)
 
     def load_story_from_file(self, file_path):
         try:
