@@ -16,24 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_path_for_ffmpeg(path):
-    """
-    Chuẩn hóa đường dẫn để sử dụng với ffmpeg trên Windows.
-    Đảm bảo đường dẫn luôn là tuyệt đối, sử dụng dấu / thay vì \,
-    và xử lý các ký tự đặc biệt.
-
-    Args:
-        path (str): Đường dẫn cần chuẩn hóa
-
-    Returns:
-        str: Đường dẫn đã chuẩn hóa
-    """
-    import pathlib
-
-    # Chuyển đổi thành đường dẫn tuyệt đối
-    abs_path = str(pathlib.Path(path).absolute())
-    # Thay thế dấu \ bằng /
-    normalized_path = abs_path.replace("\\", "/")
-    return normalized_path
+    return str(path).replace("\\", "/").replace(":", "\\:")
 
 
 def create_video(image_path, audio_path, output_path, subtitle_path=None):
@@ -309,9 +292,7 @@ def create_video_with_segments(
                 import subprocess
 
                 # Chuẩn bị phần filter cho phụ đề
-                subtitle_filter = (
-                    f"subtitles='{subtitle_path_escaped}':{subtitle_options}"
-                )
+                subtitle_filter = f"subtitles='{subtitle_path_escaped}':{subtitle_options}"
 
                 cmd_subtitle = [
                     "ffmpeg",
