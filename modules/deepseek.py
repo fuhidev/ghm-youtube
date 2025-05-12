@@ -50,7 +50,15 @@ class DeepSeek:
             "Authorization": f"Bearer {self.api_key}",
         }
 
-    def chat(self, prompt, temperature=0.1, max_tokens=4000, retries=3, delay=2):
+    def chat(
+        self,
+        system_prompt,
+        prompt,
+        temperature=0.1,
+        max_tokens=4000,
+        retries=3,
+        delay=2,
+    ):
         """
         Send a chat request to DeepSeek API
 
@@ -70,10 +78,17 @@ class DeepSeek:
 
         payload = {
             "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": system_prompt} if system_prompt else None,
+                {"role": "user", "content": prompt},
+            ],
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+        # Remove None values from the messages list
+        payload["messages"] = [
+            message for message in payload["messages"] if message is not None
+        ]
 
         # Try to make the request with retries
         for attempt in range(retries):

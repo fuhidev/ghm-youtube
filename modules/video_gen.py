@@ -15,6 +15,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def normalize_path_for_ffmpeg(path):
+    """
+    Chuẩn hóa đường dẫn để sử dụng với ffmpeg trên Windows.
+    Đảm bảo đường dẫn luôn là tuyệt đối, sử dụng dấu / thay vì \,
+    và xử lý các ký tự đặc biệt.
+
+    Args:
+        path (str): Đường dẫn cần chuẩn hóa
+
+    Returns:
+        str: Đường dẫn đã chuẩn hóa
+    """
+    import pathlib
+
+    # Chuyển đổi thành đường dẫn tuyệt đối
+    abs_path = str(pathlib.Path(path).absolute())
+    # Thay thế dấu \ bằng /
+    normalized_path = abs_path.replace("\\", "/")
+    return normalized_path
+
+
 def create_video(image_path, audio_path, output_path, subtitle_path=None):
     # Lấy độ dài audio
     probe = ffmpeg.probe(audio_path)
@@ -55,14 +76,7 @@ def create_video(image_path, audio_path, output_path, subtitle_path=None):
             return output_path
 
         # Sử dụng đường dẫn tuyệt đối cho Windows
-        import pathlib
-
-        subtitle_absolute_path = pathlib.Path(subtitle_path).absolute()
-
-        # Escape đường dẫn phụ đề cho ffmpeg theo cách đảm bảo hoạt động trên Windows
-        subtitle_path_escaped = (
-            str(subtitle_absolute_path).replace("\\", "/").replace(":", "\\:")
-        )
+        subtitle_path_escaped = normalize_path_for_ffmpeg(subtitle_path)
 
         # Sử dụng subtitles filter với các tùy chọn để phụ đề lớn, đậm, màu trắng viền xanh, ở giữa
         subtitle_options = f"force_style='Fontname=Arial,Fontsize=28,PrimaryColour=&HFFFFFF,OutlineColour=&H0000FF,BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=35'"
@@ -172,41 +186,92 @@ def create_video_with_segments(
 
     with open(concat_file_path, "w", encoding="utf-8") as f:
         for img_path in valid_image_paths:
-            # Định dạng đường dẫn cho ffmpeg
-            img_path_escaped = img_path.replace("\\", "/")
+            # Lấy đường dẫn tuyệt đối
+            img_path_escaped = normalize_path_for_ffmpeg(img_path)
             f.write(f"file '{img_path_escaped}'\n")
             f.write(f"duration {segment_duration}\n")
 
-        # Thêm hình ảnh cuối cùng một lần nữa với duration 0 để tránh lỗi
-        img_path_escaped = valid_image_paths[-1].replace("\\", "/")
+        # Thêm hình ảnh cuối cùng một lần nữa với duration 0 để tránh lỗi        img_path_escaped = normalize_path_for_ffmpeg(valid_image_paths[-1])
         f.write(f"file '{img_path_escaped}'\n")
 
     # Tạo video từ danh sách hình ảnh (không có audio)
     temp_video_no_audio = output_path + ".temp_no_audio.mp4"
 
     try:
-        # Sử dụng ffmpeg để tạo video từ danh sách hình ảnh
-        (
-            ffmpeg.input(concat_file_path, format="concat", safe=0)
-            .output(temp_video_no_audio, vcodec="libx264", pix_fmt="yuv420p", r=24)
-            .run(overwrite_output=True)
-        )
+        # Log thông tin về concat_file_path để debug
+        logger.info(f"Sử dụng concat file: {concat_file_path}")
+        with open(concat_file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            logger.info(
+                f"Nội dung concat file: {content}"
+            )  # Thay vì dùng python-ffmpeg, dùng subprocess để có thể kiểm soát chính xác cách truyền đường dẫn
+        import subprocess
 
-        # Thêm audio vào video
+        try:
+            # Thêm '@' vào trước đường dẫn để tránh các vấn đề với ký tự đặc biệt trên Windows
+            abs_concat_path = os.path.abspath(concat_file_path)
+            logger.info(f"Đường dẫn concat file tuyệt đối: {abs_concat_path}")
+
+            # Sử dụng ffmpeg trực tiếp qua subprocess
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-safe",
+                "0",
+                "-f",
+                "concat",
+                "-i",
+                abs_concat_path,
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                "24",
+                temp_video_no_audio,
+            ]
+            logger.info(f"Chạy lệnh ffmpeg: {' '.join(cmd)}")
+
+            result = subprocess.run(cmd, capture_output=True, text=True)
+
+            if result.returncode != 0:
+                logger.error(f"Lỗi ffmpeg: {result.stderr}")
+                raise Exception(result.stderr)
+            else:
+                logger.info("Tạo video không có audio thành công")
+        except Exception as subprocess_error:
+            logger.error(f"Lỗi khi chạy ffmpeg: {str(subprocess_error)}")
+            raise  # Thêm audio vào video sử dụng subprocess
         temp_video = output_path + ".temp.mp4"
-        input_video = ffmpeg.input(temp_video_no_audio)
-        input_audio = ffmpeg.input(audio_path)
+        try:
+            import subprocess
 
-        (
-            ffmpeg.output(
-                input_video,
-                input_audio,
+            cmd_audio = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                temp_video_no_audio,
+                "-i",
+                audio_path,
+                "-c:v",
+                "copy",
+                "-c:a",
+                "aac",
+                "-shortest",
                 temp_video,
-                vcodec="copy",
-                acodec="aac",
-                shortest=None,
-            ).run(overwrite_output=True)
-        )
+            ]
+            logger.info(f"Chạy lệnh thêm audio: {' '.join(cmd_audio)}")
+
+            result_audio = subprocess.run(cmd_audio, capture_output=True, text=True)
+
+            if result_audio.returncode != 0:
+                logger.error(f"Lỗi khi thêm audio: {result_audio.stderr}")
+                raise Exception(result_audio.stderr)
+            else:
+                logger.info("Thêm audio vào video thành công")
+        except Exception as audio_error:
+            logger.error(f"Lỗi khi thêm audio: {str(audio_error)}")
+            raise
 
         # Tiếp tục với phần xử lý phụ đề như trong hàm create_video
         if subtitle_path and os.path.exists(subtitle_path):
@@ -229,17 +294,8 @@ def create_video_with_segments(
                 if os.path.exists(concat_file_path):
                     os.remove(concat_file_path)
 
-                return output_path
-
-            # Sử dụng đường dẫn tuyệt đối cho Windows
-            import pathlib
-
-            subtitle_absolute_path = pathlib.Path(subtitle_path).absolute()
-
-            # Escape đường dẫn phụ đề cho ffmpeg theo cách đảm bảo hoạt động trên Windows
-            subtitle_path_escaped = (
-                str(subtitle_absolute_path).replace("\\", "/").replace(":", "\\:")
-            )
+                return output_path  # Sử dụng đường dẫn tuyệt đối cho Windows
+            subtitle_path_escaped = os.path.abspath(subtitle_path)
 
             # Sử dụng subtitles filter với các tùy chọn để phụ đề lớn, đậm, màu trắng viền xanh, ở giữa
             subtitle_options = f"force_style='Fontname=Arial,Fontsize=28,PrimaryColour=&HFFFFFF,OutlineColour=&H0000FF,BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=35'"
@@ -249,16 +305,39 @@ def create_video_with_segments(
                 if os.path.exists(output_path):
                     os.remove(output_path)
 
-                # Sử dụng vf=subtitles trực tiếp
-                (
-                    ffmpeg.output(
-                        video_with_subtitles,
-                        output_path,
-                        vf=f"subtitles='{subtitle_path_escaped}':{subtitle_options}",
-                        vcodec="libx264",
-                        acodec="copy",
-                    ).run(overwrite_output=True)
+                # Sử dụng subprocess để thêm phụ đề
+                import subprocess
+
+                # Chuẩn bị phần filter cho phụ đề
+                subtitle_filter = (
+                    f"subtitles='{subtitle_path_escaped}':{subtitle_options}"
                 )
+
+                cmd_subtitle = [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    temp_video,
+                    "-vf",
+                    subtitle_filter,
+                    "-c:v",
+                    "libx264",
+                    "-c:a",
+                    "copy",
+                    output_path,
+                ]
+
+                logger.info(f"Chạy lệnh thêm phụ đề: {' '.join(cmd_subtitle)}")
+                result_subtitle = subprocess.run(
+                    cmd_subtitle, capture_output=True, text=True
+                )
+
+                if result_subtitle.returncode != 0:
+                    logger.error(f"Lỗi khi thêm phụ đề: {result_subtitle.stderr}")
+                    raise Exception(result_subtitle.stderr)
+                else:
+                    logger.info("Thêm phụ đề vào video thành công")
+
             except Exception as e:
                 logger.error(f"Lỗi khi thêm phụ đề: {str(e)}")
 
@@ -273,12 +352,15 @@ def create_video_with_segments(
             os.rename(temp_video, output_path)
 
         # Dọn dẹp file tạm
-        if os.path.exists(temp_video):
-            os.remove(temp_video)
-        if os.path.exists(temp_video_no_audio):
-            os.remove(temp_video_no_audio)
-        if os.path.exists(concat_file_path):
-            os.remove(concat_file_path)
+        for file_path in [temp_video, temp_video_no_audio, concat_file_path]:
+            try:
+                if file_path and os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Đã xóa file tạm: {file_path}")
+            except Exception as cleanup_error:
+                logger.warning(
+                    f"Không thể xóa file tạm {file_path}: {str(cleanup_error)}"
+                )
 
         logger.info(f"Đã tạo video từ {len(valid_image_paths)} hình ảnh: {output_path}")
         return output_path

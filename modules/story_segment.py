@@ -166,12 +166,18 @@ class StorySegmenter:
 
             # Make the prompt concise (max 250 characters)
             prompt = textwrap.shorten(prompt_text, width=250, placeholder="...")
-            system_prompt = "cung cấp cho tôi prompt để tạo hình với lenardo.ai với nội dung như sau, lưu ý chỉ trả về duy nhất một prompt tốt nhất và chỉ có duy nhất nội dung prompt"
-            vn_prompt = f"{system_prompt}\n{prompt}"
+            system_prompt = f"""cung cấp cho tôi prompt để tạo hình với lenardo.ai với nội dung như sau
+            lưu ý 
+            1. chỉ trả về duy nhất một prompt tốt nhất
+            2. chỉ có duy nhất nội dung prompt
+            3. nội dung phản hồi bằng tiếng anh
+            4. không đưa tên người vào nội dung prompt mà thay bằng chàng trai, cô gái, ông già tương úng với độ tuổi của nhân viên"""
 
             # Convert to final prompt using DeepSeek
             try:
-                final_prompt = self.deepseek.chat(vn_prompt)
+                final_prompt = self.deepseek.chat(
+                    prompt=prompt, system_prompt=system_prompt
+                )
                 logger.info(
                     f"Generated prompt for segment {i+1}: {final_prompt[:50]}..."
                 )
