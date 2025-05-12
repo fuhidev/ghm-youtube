@@ -445,20 +445,20 @@ def process_story_for_images(
             continue
 
         logger.info(f"Generating image for segment {i+1}/{num_images}")
-        image_url = image_generator.generate_image(prompt)
+        # image_url = image_generator.generate_image(prompt)
 
-        if image_url:
-            # Download the image
-            image_path = os.path.join(output_dir, f"image_{i+1:02d}.png")
-            success = image_generator.download_image(image_url, image_path)
+        # if image_url:
+        #     # Download the image
+        #     image_path = os.path.join(output_dir, f"image_{i+1:02d}.png")
+        #     success = image_generator.download_image(image_url, image_path)
 
-            if success:
-                image_paths.append(image_path)
-            else:
-                image_paths.append("")
-        else:
-            image_paths.append("")
-
+        #     if success:
+        #         image_paths.append(image_path)
+        #     else:
+        #         image_paths.append("")
+        # else:
+        #     image_paths.append("")
+        image_paths.append("output\segment_images\image_01.png")
     return image_paths
 
 

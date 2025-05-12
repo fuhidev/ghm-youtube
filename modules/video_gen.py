@@ -171,6 +171,7 @@ def create_video_with_segments(
         for img_path in valid_image_paths:
             # Lấy đường dẫn tuyệt đối
             img_path_escaped = normalize_path_for_ffmpeg(img_path)
+            img_path_escaped = img_path_escaped.replace("output/", "")
             f.write(f"file '{img_path_escaped}'\n")
             f.write(f"duration {segment_duration}\n")
 
@@ -292,7 +293,9 @@ def create_video_with_segments(
                 import subprocess
 
                 # Chuẩn bị phần filter cho phụ đề
-                subtitle_filter = f"subtitles='{subtitle_path_escaped}':{subtitle_options}"
+                subtitle_filter = (
+                    f"subtitles='{subtitle_path_escaped}':{subtitle_options}"
+                )
 
                 cmd_subtitle = [
                     "ffmpeg",
