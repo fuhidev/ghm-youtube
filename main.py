@@ -38,6 +38,43 @@ class MainWindow(QMainWindow):
         )
         self.init_ui()
 
+    def estimate_video_duration(self, text, speed_factor):
+        """Ước lượng thời gian video dựa vào số lượng ký tự và tốc độ đọc"""
+        # Tốc độ đọc trung bình: ~15-20 ký tự/giây ở tốc độ bình thường
+        chars = len(text.strip())
+
+        # Chuyển đổi speed_factor từ format "+7%" sang số thập phân
+        if speed_factor.startswith("+"):
+            speed_factor = 1 + float(speed_factor.strip("+%")) / 100
+        elif speed_factor.startswith("-"):
+            speed_factor = 1 - float(speed_factor.strip("-%")) / 100
+        else:
+            speed_factor = 1
+
+        # Ước tính số ký tự/giây dựa vào tốc độ (15 ký tự/giây ở tốc độ bình thường)
+        chars_per_second = 15 * speed_factor
+
+        # Tính thời gian ước lượng
+        seconds = chars / chars_per_second
+
+        return seconds
+
+    def update_duration_estimate(self):
+        """Cập nhật ước lượng thời gian video khi text hoặc tốc độ thay đổi"""
+        text = self.story_input.toPlainText()
+        speed_factor = self.speed_combobox.currentData()
+
+        if text:
+            duration_seconds = self.estimate_video_duration(text, speed_factor)
+            minutes = int(duration_seconds // 60)
+            seconds = int(duration_seconds % 60)
+
+            self.estimated_duration_label.setText(
+                f"Thời lượng ước tính: {minutes} phút {seconds} giây"
+            )
+        else:
+            self.estimated_duration_label.setText("Thời lượng ước tính: chưa có")
+
     def init_ui(self):
         layout = QVBoxLayout()
 
@@ -201,6 +238,10 @@ class MainWindow(QMainWindow):
         self.refresh_voices_btn = QPushButton("Cập nhật danh sách giọng đọc", self)
         voice_layout.addWidget(self.refresh_voices_btn)
 
+        # Estimated duration label
+        self.estimated_duration_label = QLabel("Thời lượng ước tính: chưa có", self)
+        voice_layout.addWidget(self.estimated_duration_label)
+
         voice_group.setLayout(voice_layout)
         layout.addWidget(voice_group)
 
@@ -225,6 +266,8 @@ class MainWindow(QMainWindow):
         # self.schedule_btn.clicked.connect(self.handle_schedule)
         self.refresh_voices_btn.clicked.connect(self.update_voice_list)
         self.lang_combobox.currentIndexChanged.connect(self.update_voice_list)
+        self.story_input.textChanged.connect(self.update_duration_estimate)
+        self.speed_combobox.currentIndexChanged.connect(self.update_duration_estimate)
 
         # Connect input type signals
         self.input_direct_btn.clicked.connect(self.toggle_input_mode)
