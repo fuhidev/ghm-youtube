@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
 
         # Thêm các tùy chọn tốc độ đọc
         self.speed_combobox.addItem("Rất chậm", "-50%")
-        self.speed_combobox.addItem("Chậm", "-25%")
+        self.speed_combobox.addItem("Chậm", "-15%")
         self.speed_combobox.addItem("Bình thường", "+0%")
         self.speed_combobox.addItem("Nhanh", "+25%")
         self.speed_combobox.addItem("Rất nhanh", "+50%")
