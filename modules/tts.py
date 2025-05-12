@@ -35,9 +35,11 @@ def filter_voices_by_language(all_voices, language_code="vi-VN"):
     return filtered_voices
 
 
-async def generate_speech_with_edge_tts(text, output_path, voice="vi-VN-HoaiMyNeural"):
+async def generate_speech_with_edge_tts(
+    text, output_path, voice="vi-VN-HoaiMyNeural", rate="+0%"
+):
     """Tạo speech với Edge TTS và trả về timing data"""
-    communicate = edge_tts.Communicate(text, voice)
+    communicate = edge_tts.Communicate(text, voice, rate=rate)
 
     # Tạo SubMaker để xử lý subtitles
     sub_maker = edge_tts.submaker.SubMaker()
@@ -76,18 +78,18 @@ def convert_edge_tts_timing(timing_data, original_text):
     """Chuyển đổi timing data từ Edge TTS sang định dạng phù hợp với code hiện tại"""
     word_timings = []
     lines = timing_data.strip().split("\n")
-    
+
     print(f"Số dòng timing data: {len(lines)}")
     if len(lines) > 0:
         print(f"Mẫu dòng đầu tiên: {lines[0]}")
-    
+
     # Xử lý định dạng SRT: số thứ tự, thời gian, và nội dung
     index = 0
     while index < len(lines):
         # Tìm dòng chứa số thứ tự (index định dạng SRT)
         if lines[index].strip().isdigit():
             srt_index = int(lines[index].strip())
-            
+
             # Dòng tiếp theo là timestamp
             if index + 1 < len(lines) and " --> " in lines[index + 1]:
                 time_line = lines[index + 1]
@@ -95,21 +97,23 @@ def convert_edge_tts_timing(timing_data, original_text):
                 if len(parts) == 2:
                     start_time = parts[0].strip()
                     end_time = parts[1].strip()
-                    
+
                     # Dòng tiếp theo là nội dung
                     if index + 2 < len(lines):
                         content = lines[index + 2].strip()
-                        
+
                         # Chuyển đổi thời gian
                         start_seconds = time_to_seconds(start_time)
                         end_seconds = time_to_seconds(end_time)
-                        
-                        word_timings.append({
-                            "word": content,
-                            "start": start_seconds,
-                            "end": end_seconds
-                        })
-                
+
+                        word_timings.append(
+                            {
+                                "word": content,
+                                "start": start_seconds,
+                                "end": end_seconds,
+                            }
+                        )
+
                 # Tìm dòng trống tiếp theo
                 index += 3
                 while index < len(lines) and lines[index].strip():
@@ -119,11 +123,11 @@ def convert_edge_tts_timing(timing_data, original_text):
                 index += 1
         else:
             index += 1
-    
+
     print(f"Số lượng word_timings sau khi xử lý: {len(word_timings)}")
     if len(word_timings) > 0:
         print(f"Mẫu word_timing đầu tiên: {word_timings[0]}")
-    
+
     return word_timings
 
     return word_timings
@@ -146,7 +150,9 @@ def time_to_seconds(time_str):
         return 0  # Trả về 0 trong trường hợp lỗi
 
 
-def text_to_speech(text, output_path, lang="vi", timing_file=None, voice=None):
+def text_to_speech(
+    text, output_path, lang="vi", timing_file=None, voice=None, rate="+0%"
+):
     """Hàm wrapper để gọi Edge TTS và duy trì API giống với gTTS"""
     # Luôn tạo event loop mới để tránh DeprecationWarning
     loop = asyncio.new_event_loop()
@@ -161,7 +167,7 @@ def text_to_speech(text, output_path, lang="vi", timing_file=None, voice=None):
 
     # Gọi hàm async để tạo speech
     word_timings = loop.run_until_complete(
-        generate_speech_with_edge_tts(text, output_path, voice)
+        generate_speech_with_edge_tts(text, output_path, voice, rate)
     )
 
     # Lưu timing data vào file nếu được chỉ định

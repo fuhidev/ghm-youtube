@@ -9,10 +9,16 @@ import time
 from typing import List, Dict, Optional
 import textwrap
 from modules.translate import DeepseekTranslator
+from modules.deepseek import DeepSeek
 
-# Configure logging
+# Configure more detailed logging for debugging
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.DEBUG,  # Change from INFO to DEBUG
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("debug.log"),  # Log to file
+        logging.StreamHandler(),  # Log to console
+    ],
 )
 logger = logging.getLogger(__name__)
 
@@ -34,6 +40,9 @@ class StorySegmenter:
         self.num_segments = num_segments
         self.segments = []
         self.prompts = []
+        # Initialize DeepSeek for prompt generation
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        self.deepseek = DeepSeek(api_key)
 
     def segment_by_paragraphs(self) -> List[str]:
         """
@@ -157,24 +166,19 @@ class StorySegmenter:
 
             # Make the prompt concise (max 250 characters)
             prompt = textwrap.shorten(prompt_text, width=250, placeholder="...")
+            system_prompt = "cung cấp cho tôi prompt để tạo hình với lenardo.ai với nội dung như sau, lưu ý chỉ trả về duy nhất một prompt tốt nhất và chỉ có duy nhất nội dung prompt"
+            vn_prompt = f"{system_prompt}\n{prompt}"
 
-            # Add style instructions for consistency (in Vietnamese)
-            style_instruction_vi = (
-                "Hình ảnh hiện thực, phong cách tiên hiệp, "
-                "fantasy, chi tiết cao, ánh sáng tự nhiên"
-            )
+            # Convert to final prompt using DeepSeek
+            try:
+                final_prompt = self.deepseek.chat(vn_prompt)
+                logger.info(
+                    f"Generated prompt for segment {i+1}: {final_prompt[:50]}..."
+                )
+            except Exception as e:
+                logger.error(f"Error generating prompt for segment {i+1}: {str(e)}")
+                final_prompt = prompt  # Fallback to original prompt
 
-            # Translate Vietnamese prompt to English for better Leonardo.ai results
-            english_prompt = self.translate_text_to_english(prompt)
-
-            # English style instruction equivalent
-            style_instruction_en = (
-                "Realistic image, xianxia style, "
-                "fantasy, high detail, natural lighting"
-            )
-
-            # Create final prompt in English
-            final_prompt = f"{english_prompt} {style_instruction_en}"
             self.prompts.append(final_prompt)
 
         return self.prompts
@@ -231,7 +235,7 @@ class LeonardoImageGenerator:
             "Content-Type": "application/json",
         }
         # Default model ID (you can change this based on what works best)
-        self.model_id = "e316348f-7773-490e-adcd-46757c738eb7"  # Leonardo Diffusion XL
+        self.model_id = "ac614f96-1082-45bf-be9d-757f2d31c174"  # Leonardo Diffusion XL
 
     def generate_image(self, prompt: str, negative_prompt: str = "") -> Optional[str]:
         """
@@ -255,8 +259,8 @@ class LeonardoImageGenerator:
             "modelId": self.model_id,
             "negative_prompt": negative_prompt
             or "blurry, distorted, deformed, text, bad anatomy, extra limbs",
-            "width": 1024,
-            "height": 768,
+            "width": 1024,  # Full HD width
+            "height": 768,  # Full HD height
             "num_images": 1,
             "sd_version": "v2",  # Using Stable Diffusion v2
         }
@@ -266,7 +270,12 @@ class LeonardoImageGenerator:
             response = requests.post(generation_url, json=payload, headers=self.headers)
             response.raise_for_status()
 
-            generation_id = response.json()["sdGenerationJob"]["generationId"]
+            response_data = response.json()
+            logger.debug(
+                f"Leonardo API response: {json.dumps(response_data, indent=2)}"
+            )
+
+            generation_id = response_data["sdGenerationJob"]["generationId"]
             logger.info(f"Generation job created with ID: {generation_id}")
 
             # Poll for generation results
@@ -283,16 +292,26 @@ class LeonardoImageGenerator:
                 status_response.raise_for_status()
 
                 status_data = status_response.json()
-                status = status_data["sdGenerationJob"]["status"]
+                status = status_data["generations_by_pk"]["status"]
+                logger.info(f"Job status: {status}")
 
                 if status == "COMPLETE":
-                    image_url = status_data["generations_by_pk"]["generated_images"][0][
-                        "url"
-                    ]
-                    logger.info(f"Image generated successfully: {image_url}")
-                    return image_url
+                    try:
+                        image_url = status_data["generations_by_pk"][
+                            "generated_images"
+                        ][0]["url"]
+                        logger.info(f"Image generated successfully: {image_url}")
+                        return image_url
+                    except (KeyError, IndexError) as e:
+                        logger.error(f"Error extracting image URL from response: {e}")
+                        logger.error(
+                            f"Response structure: {json.dumps(status_data, indent=2)}"
+                        )
+                        return None
                 elif status == "FAILED":
-                    logger.error("Image generation failed")
+                    logger.error(
+                        f"Image generation failed. Response: {json.dumps(status_data, indent=2)}"
+                    )
                     return None
 
                 logger.info(f"Generation status: {status}, waiting...")
@@ -307,27 +326,83 @@ class LeonardoImageGenerator:
 
     def download_image(self, image_url: str, output_path: str) -> bool:
         """
-        Download an image from a URL
-
-        Args:
-            image_url (str): URL of the image to download
-            output_path (str): Path to save the downloaded image
-
-        Returns:
-            bool: True if download was successful, False otherwise
+        Download an image from a URL with detailed debugging
         """
         try:
-            response = requests.get(image_url, stream=True)
-            response.raise_for_status()
+            logger.info(f"DEBUG: Attempting to download from URL: {image_url}")
+            logger.info(f"DEBUG: Output path: {output_path}")
 
-            with open(output_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            logger.info(
+                f"DEBUG: Directory created/verified: {os.path.dirname(os.path.abspath(output_path))}"
+            )
 
-            logger.info(f"Image downloaded successfully to {output_path}")
-            return True
+            # First, test if URL is accessible
+            logger.info("DEBUG: Testing URL accessibility...")
+            test_response = requests.head(image_url, timeout=10)
+            logger.info(f"DEBUG: URL HEAD response status: {test_response.status_code}")
+            logger.info(
+                f"DEBUG: URL HEAD response headers: {dict(test_response.headers)}"
+            )
+
+            # Add retry logic for more reliable downloading
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = requests.get(image_url, stream=True, timeout=30)
+                    response.raise_for_status()
+
+                    # Check if we received valid image data
+                    content_type = response.headers.get("content-type", "")
+                    if not content_type.startswith("image/"):
+                        logger.warning(f"Received non-image content: {content_type}")
+                        if attempt < max_retries - 1:
+                            logger.info(
+                                f"Retrying download (attempt {attempt+1}/{max_retries})..."
+                            )
+                            time.sleep(2)
+                            continue
+                        return False
+
+                    # Save the image
+                    with open(output_path, "wb") as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            f.write(chunk)
+
+                    # Verify the file was created and has content
+                    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                        logger.info(
+                            f"Image downloaded successfully to {output_path} ({os.path.getsize(output_path)} bytes)"
+                        )
+                        return True
+                    else:
+                        logger.error(
+                            f"Image file is empty or not created: {output_path}"
+                        )
+                        if attempt < max_retries - 1:
+                            logger.info(
+                                f"Retrying download (attempt {attempt+1}/{max_retries})..."
+                            )
+                            time.sleep(2)
+                            continue
+                        return False
+
+                except requests.RequestException as e:
+                    logger.error(
+                        f"Request exception during download (attempt {attempt+1}): {str(e)}"
+                    )
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying download in 2 seconds...")
+                        time.sleep(2)
+                    else:
+                        return False
+
+            # If we get here, all retries failed
+            return False
+
         except Exception as e:
-            logger.error(f"Error downloading image: {str(e)}")
+            logger.error(f"Error downloading image: {str(e)}, type: {type(e)}")
             return False
 
 

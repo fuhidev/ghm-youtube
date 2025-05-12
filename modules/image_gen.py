@@ -61,28 +61,81 @@ def _generate_single_image(story, output_path, api_key):
     Tạo một hình ảnh duy nhất từ nội dung truyện
     """
     try:
+        print(f"DEBUG: Starting image generation for story: {story[:50]}...")
+
         # Tạo prompt từ nội dung truyện
         segmenter = StorySegmenter(story, 1)
         segmenter.segment_by_paragraphs()
         prompts = segmenter.generate_prompts()
 
+        print(f"DEBUG: Generated prompts: {prompts}")
+
         if prompts and prompts[0]:
             # Tạo hình ảnh với Leonardo.ai
             generator = LeonardoImageGenerator(api_key)
+            print(f"DEBUG: Using API key: {api_key[:5]}...")
             image_url = generator.generate_image(prompts[0])
 
-            if image_url:
-                success = generator.download_image(image_url, output_path)
-                if success:
-                    logger.info(f"Đã tạo hình ảnh thành công: {output_path}")
-                    return output_path
+            print(f"DEBUG: Image URL from Leonardo: {image_url}")
 
-        # Nếu không thể tạo hình ảnh từ API, tạo hình ảnh mặc định
+            if image_url:
+                logger.info(f"Leonardo.ai returned image URL: {image_url}")
+
+                # Ensure output directory exists
+                os.makedirs(
+                    os.path.dirname(os.path.abspath(output_path)), exist_ok=True
+                )
+
+                # Download the image
+                success = generator.download_image(image_url, output_path)
+
+                if (
+                    success
+                    and os.path.exists(output_path)
+                    and os.path.getsize(output_path) > 0
+                ):
+                    logger.info(
+                        f"Đã tạo hình ảnh thành công: {output_path} ({os.path.getsize(output_path)} bytes)"
+                    )
+                    return output_path
+                else:
+                    logger.error(
+                        f"Image download failed or file is empty: {output_path}"
+                    )
+
+                    # Check if a previous valid image exists (for cases where the API worked but download failed)
+                    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                        logger.info(f"Using previously downloaded image: {output_path}")
+                        return output_path
+
+                    # Try to manually download the image with a different method
+                    try:
+                        logger.info(
+                            f"Attempting alternative download method for {image_url}"
+                        )
+                        import urllib.request
+
+                        urllib.request.urlretrieve(image_url, output_path)
+                        if (
+                            os.path.exists(output_path)
+                            and os.path.getsize(output_path) > 0
+                        ):
+                            logger.info(
+                                f"Alternative download successful: {output_path}"
+                            )
+                            return output_path
+                    except Exception as e:
+                        logger.error(f"Alternative download method failed: {str(e)}")
+
+        # Nếu không thể tạo hoặc tải hình ảnh từ API, tạo hình ảnh mặc định
         logger.warning("Không thể tạo hình ảnh từ API, sử dụng hình ảnh mặc định.")
         return _create_default_image(story, output_path)
 
     except Exception as e:
         logger.error(f"Lỗi khi tạo hình ảnh: {str(e)}")
+        import traceback
+
+        logger.error(traceback.format_exc())
         return _create_default_image(story, output_path)
 
 

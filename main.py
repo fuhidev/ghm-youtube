@@ -180,7 +180,22 @@ class MainWindow(QMainWindow):
 
         voice_layout_row.addWidget(voice_label)
         voice_layout_row.addWidget(self.voice_combobox)
-        voice_layout.addLayout(voice_layout_row)
+        voice_layout.addLayout(voice_layout_row)  # Tốc độ đọc
+        speed_layout = QHBoxLayout()
+        speed_label = QLabel("Tốc độ đọc:", self)
+        self.speed_combobox = QComboBox(self)
+
+        # Thêm các tùy chọn tốc độ đọc
+        self.speed_combobox.addItem("Rất chậm", "-50%")
+        self.speed_combobox.addItem("Chậm", "-25%")
+        self.speed_combobox.addItem("Bình thường", "+0%")
+        self.speed_combobox.addItem("Nhanh", "+25%")
+        self.speed_combobox.addItem("Rất nhanh", "+50%")
+        self.speed_combobox.setCurrentIndex(2)  # Bình thường là mặc định
+
+        speed_layout.addWidget(speed_label)
+        speed_layout.addWidget(self.speed_combobox)
+        voice_layout.addLayout(speed_layout)
 
         # Nút cập nhật danh sách giọng
         self.refresh_voices_btn = QPushButton("Cập nhật danh sách giọng đọc", self)
@@ -396,11 +411,10 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(
                     self, "Lỗi dịch thuật", f"Không thể dịch văn bản: {str(e)}"
                 )
-                return
-
-        # Lấy giọng đọc được chọn
+                return  # Lấy giọng đọc được chọn
         selected_voice = self.voice_combobox.currentData()
         selected_lang = self.lang_combobox.currentData()
+        selected_speed = self.speed_combobox.currentData()
 
         # Ensure Vietnamese language is selected for translated content
         if self.translate_checkbox.isChecked():
@@ -416,7 +430,7 @@ class MainWindow(QMainWindow):
 
         # 1. TTS (với ước tính thời gian)
         self.status_label.setText(
-            f"Đang tạo giọng nói ({selected_voice}) và tính thời gian..."
+            f"Đang tạo giọng nói ({selected_voice}, tốc độ: {selected_speed}) và tính thời gian..."
         )
         QApplication.processEvents()
         audio_path, word_timings = text_to_speech(
@@ -425,6 +439,7 @@ class MainWindow(QMainWindow):
             lang=selected_lang,
             timing_file=timing_path,
             voice=selected_voice,
+            rate=selected_speed,
         )
 
         # 2. Image(s)

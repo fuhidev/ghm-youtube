@@ -11,8 +11,8 @@ def create_subtitle(
     output_path,
     font="Arial",
     color="&H00FFFFFF",
-    outline_color="&H0000FF00",
-    outline=2,
+    outline_color="&H008BDCC9",
+    outline=1,
     words_per_line=4,
     duration_per_line=2.5,
     word_timings=None,
@@ -24,7 +24,16 @@ def create_subtitle(
 
     if word_timings:
         # Nếu có timing data, sử dụng để tạo phụ đề chính xác
-        create_timed_subtitles(subs, word_timings, words_per_line, color, output_path)
+        create_timed_subtitles(
+            subs,
+            word_timings,
+            words_per_line,
+            color,
+            output_path,
+            font,
+            outline_color,
+            outline,
+        )
     else:
         # Không có timing data, sử dụng phương pháp ước lượng đều
         lines = [
@@ -33,11 +42,10 @@ def create_subtitle(
         ]
         start = 0
         for line in lines:
-            end = (
-                start + duration_per_line
-            )  # Sử dụng style đặc biệt cho định dạng karaoke
+            end = start + duration_per_line
+            # Sử dụng style đặc biệt cho định dạng karaoke với các tham số được truyền vào
             formatted_line = (
-                "{\\an2}{\\fs48}{\\b1}{\\c&HFFFFFF&}{\\3c&H00AAFF&}{\\3a&H00&}{\\4a&HFF&}"
+                f"{{\\an2}}{{\\fs28}}{{\\b1}}{{\\c{color}}}{{\\3c{outline_color}}}{{\\3a&H00&}}{{\\4a&HFF&}}"
                 + line
             )
             event = pysubs2.SSAEvent(
@@ -46,8 +54,31 @@ def create_subtitle(
             subs.events.append(event)
             start = end
 
+    # Tạo style mặc định sử dụng các tham số được truyền vào
+    style = pysubs2.SSAStyle()
+    style.fontname = font
+    style.fontsize = 28
+    style.bold = True
+    style.outline = outline
+    style.shadow = 0
+    style.primarycolor = color
+    style.outlinecolor = outline_color
+    style.alignment = 2  # 2 = giữa dưới
+    subs.styles["Default"] = style
+    subs.save(output_path)
+    return output_path
 
-def create_timed_subtitles(subs, word_timings, words_per_line, color, output_path):
+
+def create_timed_subtitles(
+    subs,
+    word_timings,
+    words_per_line,
+    color,
+    output_path,
+    font="Arial",
+    outline_color="&H0000FF00",
+    outline=2,
+):
     """Tạo phụ đề dựa trên thời gian từng từ"""
 
     current_words = []
@@ -77,11 +108,10 @@ def create_timed_subtitles(subs, word_timings, words_per_line, color, output_pat
                 print(f"Thiếu trường 'end' trong word_timing: {word_timing}")
                 continue
 
-            line_end = word_timing[
-                "end"
-            ]  # Format text với style đặc biệt (giống karaoke) - canh giữa dưới
+            line_end = word_timing["end"]
+            # Format text với style đặc biệt (giống karaoke) - canh giữa dưới
             formatted_line = (
-                "{\\an2}{\\fs28}{\\b1}{\\c&HFFFFFF&}{\\3c&H00AAFF&}{\\3a&H00&}{\\4a&HFF&}"
+                f"{{\\an2}}{{\\fs28}}{{\\b1}}{{\\c{color}}}{{\\3c{outline_color}}}{{\\3a&H00&}}{{\\4a&HFF&}}"
                 + line_text
             )
 
@@ -96,17 +126,5 @@ def create_timed_subtitles(subs, word_timings, words_per_line, color, output_pat
             current_words = []
             line_start = line_end
 
-    # Tạo style đặc biệt theo kiểu karaoke
-    style = pysubs2.SSAStyle()
-    style.fontname = "Arial"  # Font dễ đọc, hỗ trợ Unicode
-    style.fontsize = 28  # Kích thước lớn
-    style.bold = True  # Chữ đậm
-    style.outline = 2  # Độ dày viền
-    style.shadow = 0  # Không bóng
-    style.primarycolor = (
-        color  # Màu chữ trắng    style.outlinecolor = "&H00AAFF&"  # Màu viền xanh
-    )
-    style.alignment = 2  # 2 = giữa dưới
-    subs.styles["Default"] = style
-    subs.save(output_path)
+    # Note: Removed the style creation here as it's now handled in the main function
     return output_path
