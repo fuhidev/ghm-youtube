@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QCheckBox,
 )
+from PyQt6.QtCore import Qt
 from modules.tts import text_to_speech
 from modules.image_gen import generate_image_from_story
 from modules.video_gen import create_video
@@ -196,6 +197,15 @@ class MainWindow(QMainWindow):
         voice_group = QGroupBox("Lựa chọn giọng đọc")
         voice_layout = QVBoxLayout()
 
+        # Thêm lựa chọn mô hình giọng nói
+        model_layout = QHBoxLayout()
+        model_label = QLabel("Mô hình TTS:", self)
+        self.model_combobox = QComboBox(self)
+        self.model_combobox.addItem("Coqui TTS (Mặc định)", "coqui")
+        model_layout.addWidget(model_label)
+        model_layout.addWidget(self.model_combobox)
+        voice_layout.addLayout(model_layout)
+
         # Ngôn ngữ
         lang_layout = QHBoxLayout()
         lang_label = QLabel("Ngôn ngữ:", self)
@@ -331,13 +341,12 @@ class MainWindow(QMainWindow):
         story = self.story_input.toPlainText().strip()
         if not story:
             self.status_label.setText("Vui lòng nhập truyện hoặc chọn file!")
-            return
-
-        # Removed duplicate translation here as it's handled in generate_all
+            return  # Removed duplicate translation here as it's handled in generate_all
         self.status_label.setText("Đang xử lý...")
         self.generate_all(story)
 
     def update_voice_list(self):
+        """Cập nhật danh sách giọng nói dựa trên ngôn ngữ đã chọn"""
         # Lưu lại voice ID đã chọn (nếu có)
         current_voice = self.voice_combobox.currentData()
 
@@ -347,57 +356,64 @@ class MainWindow(QMainWindow):
         # Chọn danh sách giọng dựa trên ngôn ngữ
         lang_code = self.lang_combobox.currentData()
 
+        # Thêm các mô hình Coqui TTS mặc định dựa theo ngôn ngữ
         if lang_code == "vi":
-            # Thêm các giọng tiếng Việt
-            self.voice_combobox.addItem("Nữ - Hoài My (vi-VN)", "vi-VN-HoaiMyNeural")
-            self.voice_combobox.addItem("Nam - Nam Minh (vi-VN)", "vi-VN-NamMinhNeural")
+            self.voice_combobox.addItem("Tiếng Việt - VITS", "tts_models/vi/vivos/vits")
         else:
-            # Thêm các giọng tiếng Anh
-            self.voice_combobox.addItem("Nữ - Aria (en-US)", "en-US-AriaNeural")
-            self.voice_combobox.addItem("Nam - Guy (en-US)", "en-US-GuyNeural")
-            self.voice_combobox.addItem("Nữ - Jenny (en-US)", "en-US-JennyNeural")
             self.voice_combobox.addItem(
-                "Nam - Jason (en-US)", "en-US-JasonNeural"
-            )  # Khôi phục lại lựa chọn cũ nếu có trong danh sách mới
+                "Tiếng Anh - Tacotron2", "tts_models/en/ljspeech/tacotron2-DDC"
+            )
+            self.voice_combobox.addItem(
+                "Tiếng Anh - GLOW-TTS", "tts_models/en/ljspeech/glow-tts"
+            )
+            self.voice_combobox.addItem(
+                "Tiếng Anh - FastSpeech", "tts_models/en/ljspeech/fast_pitch"
+            )
+
+        # Khôi phục lại lựa chọn cũ nếu có trong danh sách mới
         if current_voice:
             index = self.voice_combobox.findData(current_voice)
             if index >= 0:
                 self.voice_combobox.setCurrentIndex(index)
 
-        # Nếu muốn tải đầy đủ danh sách giọng từ Edge TTS (có thể mất thời gian)
+        # Nếu nhấn nút làm mới danh sách giọng, tải tất cả mô hình có sẵn
         if self.sender() == self.refresh_voices_btn:
-            self.status_label.setText("Đang tải danh sách giọng từ Edge TTS...")
+            self.status_label.setText("Đang tải danh sách mô hình từ Coqui TTS...")
             QApplication.processEvents()
-            try:
-                # Luôn tạo event loop mới để tránh DeprecationWarning
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
 
-                # Lấy danh sách giọng từ Edge TTS
+            try:
+                # Lấy danh sách mô hình từ Coqui TTS
                 from modules.tts import get_available_voices, filter_voices_by_language
 
-                all_voices = loop.run_until_complete(get_available_voices())
-
-                # Xóa danh sách hiện tại
-                self.voice_combobox.clear()
+                all_voices = get_available_voices()
 
                 # Lọc theo ngôn ngữ
                 lang_prefix = "vi-VN" if lang_code == "vi" else "en"
                 filtered_voices = filter_voices_by_language(all_voices, lang_prefix)
 
+                # Xóa danh sách hiện tại
+                self.voice_combobox.clear()
+
                 # Thêm vào combo box
                 for voice in filtered_voices:
-                    gender = "Nữ" if voice["gender"] == "Female" else "Nam"
-                    name = voice["name"]
-                    locale = voice["locale"]
-                    display_text = f"{gender} - {name} ({locale})"
-                    self.voice_combobox.addItem(display_text, name)
+                    model_name = voice["name"]
+
+                    # Tạo tên hiển thị dễ đọc hơn
+                    display_name = model_name
+                    if "/" in model_name:
+                        parts = model_name.split("/")
+                        if len(parts) >= 3:
+                            lang = parts[1].upper()
+                            model_type = parts[-1]
+                            display_name = f"{lang} - {model_type}"
+
+                    self.voice_combobox.addItem(display_name, model_name)
 
                 self.status_label.setText(
-                    f"Đã tải {len(filtered_voices)} giọng {lang_prefix}"
+                    f"Đã tải {len(filtered_voices)} mô hình cho {lang_prefix}"
                 )
             except Exception as e:
-                self.status_label.setText(f"Lỗi khi tải danh sách giọng: {str(e)}")
+                self.status_label.setText(f"Lỗi khi tải danh sách mô hình: {str(e)}")
                 # Khôi phục lại danh sách mặc định
                 self.update_voice_list()
 
@@ -532,6 +548,18 @@ class MainWindow(QMainWindow):
             from modules.video_gen import create_video
 
             create_video(img_path, audio_path, video_path, sub_path)
+
+            # Hiển thị thông tin thời lượng
+            try:
+                from modules.video_gen import get_audio_duration, get_video_duration
+
+                audio_dur = get_audio_duration(audio_path)
+                video_dur = get_video_duration(video_path)
+                self.status_label.setText(
+                    f"Đã tạo video ({video_dur:.1f}s) từ audio ({audio_dur:.1f}s): {video_path}"
+                )
+            except Exception as e:
+                self.status_label.setText(f"Đã tạo video: {video_path}")
         else:
             # Tạo nhiều hình ảnh
             self.status_label.setText(
@@ -556,8 +584,7 @@ class MainWindow(QMainWindow):
                     story, total_images, segments_dir, leonardo_api_key
                 )
 
-                # 3. Subtitle (với dữ liệu timing)
-                self.status_label.setText("Đang tạo phụ đề đồng bộ với audio...")
+                # 3. Subtitle (với dữ liệu timing)                self.status_label.setText("Đang tạo phụ đề đồng bộ với audio...")
                 QApplication.processEvents()
                 create_subtitle(story, sub_path, word_timings=word_timings)
 
@@ -566,10 +593,22 @@ class MainWindow(QMainWindow):
                     f"Đang tạo video từ {len(image_paths)} hình ảnh và gắn phụ đề..."
                 )
                 QApplication.processEvents()
-
                 create_video_with_segments(
                     image_paths, audio_path, video_path, sub_path
                 )
+
+                # Hiển thị thông tin thời lượng
+                try:
+                    from modules.video_gen import get_audio_duration, get_video_duration
+
+                    audio_dur = get_audio_duration(audio_path)
+                    video_dur = get_video_duration(video_path)
+                    self.status_label.setText(
+                        f"Đã tạo video ({video_dur:.1f}s) từ audio ({audio_dur:.1f}s): {video_path}"
+                    )
+                except Exception as e:
+                    self.status_label.setText(f"Đã tạo video: {video_path}")
+
             except Exception as e:
                 self.status_label.setText(f"Lỗi khi tạo video từ nhiều hình: {str(e)}")
                 QMessageBox.warning(

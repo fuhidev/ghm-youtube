@@ -176,10 +176,15 @@ def create_video_with_segments(
 
     # Lấy độ dài audio
     probe = ffmpeg.probe(audio_path)
-    total_duration = float(probe["format"]["duration"])
-
-    # Tính thời gian cho mỗi hình ảnh
+    total_duration = float(
+        probe["format"]["duration"]
+    )  # Tính thời gian cho mỗi hình ảnh
     segment_duration = total_duration / len(valid_image_paths)
+
+    logger.info(f"Thời lượng audio: {total_duration:.2f} giây")
+    logger.info(
+        f"Chia đều cho {len(valid_image_paths)} hình, mỗi hình hiển thị {segment_duration:.2f} giây"
+    )
 
     # Tạo file danh sách hình ảnh cho ffmpeg
     concat_file_path = os.path.join(os.path.dirname(output_path), "concat_list.txt")
@@ -191,7 +196,8 @@ def create_video_with_segments(
             f.write(f"file '{img_path_escaped}'\n")
             f.write(f"duration {segment_duration}\n")
 
-        # Thêm hình ảnh cuối cùng một lần nữa với duration 0 để tránh lỗi        img_path_escaped = normalize_path_for_ffmpeg(valid_image_paths[-1])
+        # Thêm hình ảnh cuối cùng một lần nữa với duration 0 để tránh lỗi
+        img_path_escaped = normalize_path_for_ffmpeg(valid_image_paths[-1])
         f.write(f"file '{img_path_escaped}'\n")
 
     # Tạo video từ danh sách hình ảnh (không có audio)
@@ -257,7 +263,7 @@ def create_video_with_segments(
                 "copy",
                 "-c:a",
                 "aac",
-                "-shortest",
+                "-shortest",  # Đảm bảo video kết thúc khi audio kết thúc
                 temp_video,
             ]
             logger.info(f"Chạy lệnh thêm audio: {' '.join(cmd_audio)}")
@@ -409,3 +415,22 @@ def get_audio_duration(audio_path):
         except Exception as e:
             logger.error(f"Không thể lấy độ dài audio: {str(e)}")
             return 0
+
+
+def get_video_duration(video_path):
+    """
+    Lấy độ dài của file video
+
+    Args:
+        video_path (str): Đường dẫn đến file video
+
+    Returns:
+        float: Độ dài của file video (đơn vị: giây)
+    """
+    try:
+        probe = ffmpeg.probe(video_path)
+        duration = float(probe["format"]["duration"])
+        return duration
+    except Exception as e:
+        logger.error(f"Không thể lấy độ dài video: {str(e)}")
+        return 0

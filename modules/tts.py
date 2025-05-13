@@ -1,178 +1,416 @@
 # modules/tts.py
 # Chuyển văn bản thành giọng nói tiếng Việt và tính thời gian cho từng từ/câu
-import edge_tts
-import asyncio
 import os
 import re
 import json
+import logging
 import tempfile
+from typing import List, Dict, Tuple, Optional
+import torch
+from TTS.api import TTS
+import numpy as np
 from pydub import AudioSegment
 
-# Danh sách các giọng tiếng Việt có sẵn trên Edge TTS
-VIETNAMESE_VOICES = ["vi-VN-HoaiMyNeural", "vi-VN-NamMinhNeural"]  # Nữ  # Nam
+# Cấu hình logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-# Danh sách giọng tiếng Anh phổ biến
-ENGLISH_VOICES = ["en-US-AriaNeural", "en-US-GuyNeural"]  # Nữ  # Nam
+# Danh sách các mô hình tiếng Việt mặc định
+VIETNAMESE_MODELS = ["tts_models/vi/vivos/vits"]
 
-
-# Hàm lấy tất cả giọng nói có sẵn
-async def get_available_voices():
-    voices = await edge_tts.VoicesManager.create()
-    all_voices = voices.voices
-    return all_voices
-
-
-# Hàm lọc giọng nói theo ngôn ngữ
-def filter_voices_by_language(all_voices, language_code="vi-VN"):
-    filtered_voices = []
-    for voice in all_voices:
-        if voice.get("Locale", "").startswith(language_code):
-            name = voice.get("ShortName", "")
-            gender = voice.get("Gender", "")
-            filtered_voices.append(
-                {"name": name, "gender": gender, "locale": voice.get("Locale", "")}
-            )
-    return filtered_voices
+# Danh sách các mô hình tiếng Anh mặc định
+ENGLISH_MODELS = [
+    "tts_models/en/ljspeech/tacotron2-DDC",
+    "tts_models/en/ljspeech/glow-tts",
+]
 
 
-async def generate_speech_with_edge_tts(
-    text, output_path, voice="vi-VN-HoaiMyNeural", rate="+0%"
-):
-    """Tạo speech với Edge TTS và trả về timing data"""
-    communicate = edge_tts.Communicate(text, voice, rate=rate)
+class CoquiTTSWrapper:
+    """Wrapper cho Coqui TTS để dễ dàng sử dụng"""
 
-    # Tạo SubMaker để xử lý subtitles
-    sub_maker = edge_tts.submaker.SubMaker()
+    def __init__(self):
+        """Khởi tạo Coqui TTS wrapper"""
+        logger.info("Khởi tạo Coqui TTS wrapper")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Sử dụng thiết bị: {self.device}")
 
-    # Tạo file tạm để lưu timing data
-    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as tmp_file:
-        timing_file = tmp_file.name
+        # Khởi tạo TTS với mô hình mặc định (sẽ tự động tải nếu chưa có)
+        self.tts = None
+        self.current_model = None
 
-    # Mở file để lưu audio
-    with open(output_path, "wb") as audio_file:
-        # Stream audio và metadata
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_file.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                sub_maker.feed(chunk)
+    def load_model(self, model_name):
+        """Tải mô hình TTS"""
+        try:
+            logger.info(f"Đang tải mô hình Coqui TTS: {model_name}")
+            self.tts = TTS(model_name=model_name).to(self.device)
+            self.current_model = model_name
+            return True
+        except Exception as e:
+            logger.error(f"Lỗi khi tải mô hình Coqui TTS: {str(e)}")
+            return False
 
-    # Lưu subtitle data vào file tạm
-    with open(timing_file, "w", encoding="utf-8") as f:
-        f.write(sub_maker.get_srt())
+    def get_available_models(self):
+        """Lấy danh sách các mô hình Coqui TTS có sẵn"""
+        try:
+            # Trả về danh sách mô hình đã được định nghĩa sẵn để tránh vòng lặp vô hạn
+            return SUPPORTED_MODELS
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy danh sách mô hình: {str(e)}")
+            return []
 
-    # Đọc timing data từ file tạm
-    with open(timing_file, "r", encoding="utf-8") as f:
-        timing_data = f.read()
+    def get_model_speakers(self):
+        """Lấy danh sách các giọng nói cho mô hình hiện tại, nếu có"""
+        if not self.tts:
+            logger.error("Mô hình TTS chưa được tải")
+            return []
 
-    # Xóa file tạm
-    os.unlink(timing_file)
+        try:
+            return self.tts.speakers
+        except AttributeError:
+            return []
 
-    # Chuyển đổi format timing data sang định dạng giống với hàm cũ
-    word_timings = convert_edge_tts_timing(timing_data, text)
+    def synthesize(
+        self, text: str, output_path: str, speaker: str = None, speed: float = 1.0
+    ) -> Tuple[str, List[Dict]]:
+        """
+        Tổng hợp giọng nói từ văn bản và lưu vào file
 
-    return word_timings
+        Args:
+            text (str): Văn bản cần tổng hợp
+            output_path (str): Đường dẫn để lưu file audio
+            speaker (str, optional): Tên giọng nói cho mô hình multi-speaker
+            speed (float, optional): Tốc độ nói (1.0 là bình thường)
 
+        Returns:
+            Tuple[str, List[Dict]]: Đường dẫn đến file audio và dữ liệu timing
+        """
+        if not self.tts:
+            logger.error("Mô hình TTS chưa được tải")
+            return output_path, []
 
-def convert_edge_tts_timing(timing_data, original_text):
-    """Chuyển đổi timing data từ Edge TTS sang định dạng phù hợp với code hiện tại"""
-    word_timings = []
-    lines = timing_data.strip().split("\n")
+        try:
+            # Tạo thư mục nếu chưa tồn tại
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
-    print(f"Số dòng timing data: {len(lines)}")
-    if len(lines) > 0:
-        print(f"Mẫu dòng đầu tiên: {lines[0]}")
+            # Xử lý văn bản: chia thành các câu để tổng hợp tốt hơn
+            sentences = self._split_into_sentences(text)
 
-    # Xử lý định dạng SRT: số thứ tự, thời gian, và nội dung
-    index = 0
-    while index < len(lines):
-        # Tìm dòng chứa số thứ tự (index định dạng SRT)
-        if lines[index].strip().isdigit():
-            srt_index = int(lines[index].strip())
+            # Tạo file tạm cho audio trung gian
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                temp_path = tmp_file.name
 
-            # Dòng tiếp theo là timestamp
-            if index + 1 < len(lines) and " --> " in lines[index + 1]:
-                time_line = lines[index + 1]
-                parts = time_line.split(" --> ")
-                if len(parts) == 2:
-                    start_time = parts[0].strip()
-                    end_time = parts[1].strip()
+            # Xử lý từng câu và thu thập dữ liệu timing
+            word_timings = []
+            current_offset = 0
 
-                    # Dòng tiếp theo là nội dung
-                    if index + 2 < len(lines):
-                        content = lines[index + 2].strip()
+            # Tạo audio kết hợp
+            combined_audio = None
 
-                        # Chuyển đổi thời gian
-                        start_seconds = time_to_seconds(start_time)
-                        end_seconds = time_to_seconds(end_time)
+            for i, sentence in enumerate(sentences):
+                if not sentence.strip():
+                    continue
 
-                        word_timings.append(
-                            {
-                                "word": content,
-                                "start": start_seconds,
-                                "end": end_seconds,
-                            }
-                        )
+                logger.info(
+                    f"Đang tổng hợp câu {i+1}/{len(sentences)}: {sentence[:30]}..."
+                )
 
-                # Tìm dòng trống tiếp theo
-                index += 3
-                while index < len(lines) and lines[index].strip():
-                    index += 1
-                index += 1  # Vượt qua dòng trống
+                # Tổng hợp giọng nói cho câu
+                speaker_args = {}
+                if speaker and speaker in self.get_model_speakers():
+                    speaker_args = {"speaker": speaker}
+
+                wav = self.tts.tts(text=sentence, **speaker_args)
+
+                # Chuyển đổi thành AudioSegment
+                with tempfile.NamedTemporaryFile(
+                    suffix=".wav", delete=False
+                ) as sentence_file:
+                    sentence_path = sentence_file.name
+                self.tts.save_wav(wav, sentence_path)
+                sentence_audio = AudioSegment.from_wav(sentence_path)
+
+                # Điều chỉnh tốc độ nếu cần
+                if speed != 1.0:
+                    sentence_audio = self._adjust_speed(sentence_audio, speed)
+
+                # Kết hợp với audio trước đó
+                if combined_audio is None:
+                    combined_audio = sentence_audio
+                else:
+                    combined_audio += sentence_audio
+
+                # Ước tính thời gian cho từng từ trong câu
+                sentence_duration = (
+                    len(sentence_audio) / 1000.0
+                )  # Chuyển từ ms sang giây
+                sentence_timings = self._estimate_word_timings(
+                    sentence, current_offset, sentence_duration
+                )
+                word_timings.extend(sentence_timings)
+
+                # Cập nhật offset cho câu tiếp theo
+                current_offset += sentence_duration
+
+                # Xóa file tạm của câu
+                os.unlink(sentence_path)
+
+            # Lưu audio kết hợp
+            if combined_audio:
+                output_format = os.path.splitext(output_path)[1][1:].lower()
+                if output_format == "mp3":
+                    combined_audio.export(output_path, format="mp3")
+                else:
+                    combined_audio.export(output_path, format="wav")
             else:
-                index += 1
+                logger.error("Không có audio được tạo ra")
+
+            # Xóa file tạm
+            os.unlink(temp_path)
+
+            return output_path, word_timings
+
+        except Exception as e:
+            logger.error(f"Lỗi trong quá trình tổng hợp giọng nói: {str(e)}")
+            import traceback
+
+            logger.error(traceback.format_exc())
+            return output_path, []
+
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """Chia văn bản thành các câu để tổng hợp tốt hơn"""
+        # Chia câu đơn giản theo dấu câu
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        return sentences
+
+    def _estimate_word_timings(
+        self, sentence: str, start_time: float, duration: float
+    ) -> List[Dict]:
+        """
+        Ước tính thời gian cho từng từ trong một câu
+
+        Đây là một ước tính đơn giản phân bổ các từ đều nhau trong thời gian của câu.
+        Để có timing chính xác hơn, cần sử dụng forced aligner.
+        """
+        words = sentence.split()
+        if not words:
+            return []
+
+        # Phân bổ các từ đều đều trong thời lượng
+        word_duration = duration / len(words)
+
+        timings = []
+        for i, word in enumerate(words):
+            word_start = start_time + (i * word_duration)
+            word_end = word_start + word_duration
+
+            timings.append({"word": word, "start": word_start, "end": word_end})
+
+        return timings
+
+    def _adjust_speed(self, audio: AudioSegment, speed: float) -> AudioSegment:
+        """Điều chỉnh tốc độ của một đoạn audio"""
+        # Đây là cách đơn giản sử dụng pydub's speed change
+        # Lưu ý: Cách này cũng thay đổi pitch, để có kết quả tốt hơn có thể sử dụng librosa
+        sound_with_altered_frame_rate = audio._spawn(
+            audio.raw_data, overrides={"frame_rate": int(audio.frame_rate * speed)}
+        )
+        return sound_with_altered_frame_rate.set_frame_rate(audio.frame_rate)
+
+
+def get_available_voices():
+    """
+    Lấy tất cả các giọng nói/mô hình có sẵn trong Coqui TTS
+    Tương thích với hàm liệt kê giọng nói của Edge TTS
+    """
+    # Danh sách mô hình cố định để tránh việc khởi tạo nhiều instance TTS
+    # Coqui TTS có thể gây ra vòng lặp vô hạn khi tự gọi lại TTS().list_models()
+    predefined_models = [
+        # Tiếng Việt
+        "tts_models/vi/vivos/vits",
+        # Tiếng Anh
+        "tts_models/en/ljspeech/tacotron2-DDC",
+        "tts_models/en/ljspeech/glow-tts",
+        "tts_models/en/ljspeech/speedy-speech",
+        "tts_models/en/ljspeech/tacotron2-DDC_ph",
+        "tts_models/en/ljspeech/fast_pitch",
+        "tts_models/en/ljspeech/overflow",
+        "tts_models/en/vctk/vits",
+        "tts_models/en/vctk/fast_pitch",
+        "tts_models/en/sam/tacotron-DDC",
+        # Tiếng Tây Ban Nha
+        "tts_models/es/mai/tacotron2-DDC",
+        # Tiếng Pháp
+        "tts_models/fr/mai/tacotron2-DDC",
+        # Tiếng Đức
+        "tts_models/de/thorsten/tacotron2-DDC",
+        # Tiếng Hà Lan
+        "tts_models/nl/mai/tacotron2-DDC",
+        # Tiếng Ý
+        "tts_models/it/mai/glow-tts",
+        # Tiếng Nhật
+        "tts_models/ja/kokoro/tacotron2-DDC",
+    ]
+
+    # Format các mô hình để phù hợp với format của Edge TTS
+    formatted_models = []
+    for model in predefined_models:
+        # Trích xuất mã ngôn ngữ từ tên mô hình
+        if "/vi/" in model:
+            lang = "vi-VN"
+        elif "/en/" in model:
+            lang = "en-US"
+        elif "/es/" in model:
+            lang = "es-ES"
+        elif "/fr/" in model:
+            lang = "fr-FR"
+        elif "/de/" in model:
+            lang = "de-DE"
+        elif "/nl/" in model:
+            lang = "nl-NL"
+        elif "/it/" in model:
+            lang = "it-IT"
+        elif "/ja/" in model:
+            lang = "ja-JP"
         else:
-            index += 1
+            # Cố gắng trích xuất ngôn ngữ từ chuỗi mô hình
+            lang_match = re.search(r"/([a-z]{2})/", model)
+            lang = (
+                f"{lang_match.group(1)}-{lang_match.group(1).upper()}"
+                if lang_match
+                else "unknown"
+            )
 
-    print(f"Số lượng word_timings sau khi xử lý: {len(word_timings)}")
-    if len(word_timings) > 0:
-        print(f"Mẫu word_timing đầu tiên: {word_timings[0]}")
+        formatted_models.append(
+            {
+                "Name": model,
+                "ShortName": model,
+                "Gender": "Unknown",  # Coqui không chỉ định giới tính
+                "Locale": lang,
+            }
+        )
 
-    return word_timings
-
-    return word_timings
+    return formatted_models
 
 
-def time_to_seconds(time_str):
-    """Chuyển đổi định dạng thời gian HH:MM:SS.mmm hoặc HH:MM:SS,mmm sang số giây"""
-    try:
-        h, m, s = time_str.split(":")
-        # Xử lý cả dấu chấm và dấu phẩy trong định dạng thời gian
-        if "." in s:
-            s, ms = s.split(".")
-        elif "," in s:
-            s, ms = s.split(",")
-        else:
-            ms = "0"
-        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
-    except Exception as e:
-        print(f"Lỗi chuyển đổi thời gian '{time_str}': {e}")
-        return 0  # Trả về 0 trong trường hợp lỗi
+def is_model_available(model_name):
+    """
+    Kiểm tra xem mô hình có sẵn trong danh sách mô hình định nghĩa sẵn không
+
+    Args:
+        model_name (str): Tên mô hình cần kiểm tra
+
+    Returns:
+        bool: True nếu mô hình có trong danh sách, False nếu không
+    """
+    available_models = [voice["Name"] for voice in get_available_voices()]
+    return model_name in available_models
+
+
+def filter_voices_by_language(all_voices, language_code="vi-VN"):
+    """Lọc giọng nói theo mã ngôn ngữ"""
+    filtered_voices = []
+    language_prefix = language_code.split("-")[0]  # Trích xuất 'vi' từ 'vi-VN'
+
+    for voice in all_voices:
+        voice_lang = voice.get("Locale", "")
+        if voice_lang.startswith(language_code) or f"/{language_prefix}/" in voice.get(
+            "Name", ""
+        ):
+            filtered_voices.append(
+                {
+                    "name": voice.get("ShortName", ""),
+                    "gender": voice.get("Gender", "Unknown"),
+                    "locale": voice.get("Locale", ""),
+                }
+            )
+
+    return filtered_voices
 
 
 def text_to_speech(
     text, output_path, lang="vi", timing_file=None, voice=None, rate="+0%"
 ):
-    """Hàm wrapper để gọi Edge TTS và duy trì API giống với gTTS"""
-    # Luôn tạo event loop mới để tránh DeprecationWarning
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    """
+    Tạo giọng nói từ văn bản sử dụng Coqui TTS với API tương thích với hệ thống hiện tại
 
-    # Chọn voice dựa trên ngôn ngữ nếu không được chỉ định
-    if voice is None:
-        if lang == "vi":
-            voice = VIETNAMESE_VOICES[0]  # Voice nữ tiếng Việt mặc định
+    Args:
+        text (str): Văn bản cần tổng hợp thành giọng nói
+        output_path (str): Đường dẫn để lưu file audio
+        lang (str): Mã ngôn ngữ ('vi' cho tiếng Việt, 'en' cho tiếng Anh)
+        timing_file (str, optional): Đường dẫn để lưu dữ liệu timing
+        voice (str, optional): Tên giọng nói/mô hình
+        rate (str, optional): Tốc độ đọc theo định dạng "+0%", "+10%", "-5%", v.v.
+
+    Returns:
+        Tuple[str, List[Dict]]: Đường dẫn đến file audio và dữ liệu timing
+    """
+    # Chuyển đổi chuỗi rate thành số thực (ví dụ: "+7%" thành 1.07, "-5%" thành 0.95)
+    speed = 1.0
+    if rate.startswith("+"):
+        speed = 1.0 + float(rate.strip("+%")) / 100
+    elif rate.startswith("-"):
+        speed = 1.0 - float(rate.strip("-%")) / 100
+
+    # Khởi tạo và tải mô hình TTS
+    tts_wrapper = CoquiTTSWrapper()
+
+    # Chọn mô hình dựa trên ngôn ngữ và giọng được chỉ định
+    selected_model = None  # Nếu đã có mô hình được chỉ định, kiểm tra và sử dụng nó
+    if voice and voice.startswith("tts_models/"):
+        # Kiểm tra xem mô hình có nằm trong danh sách được hỗ trợ không
+        if is_model_available(voice):
+            selected_model = voice
         else:
-            voice = ENGLISH_VOICES[0]  # Voice nữ tiếng Anh mặc định
+            logger.warning(
+                f"Mô hình {voice} không có trong danh sách hỗ trợ, sử dụng mô hình mặc định"
+            )
+            # Sử dụng mô hình mặc định dựa trên ngôn ngữ
+            if lang == "vi":
+                selected_model = VIETNAMESE_MODELS[0]
+            else:
+                selected_model = ENGLISH_MODELS[0]
+    else:
+        # Nếu không, chọn mô hình mặc định dựa trên ngôn ngữ
+        if lang == "vi":
+            selected_model = VIETNAMESE_MODELS[0]
+        else:
+            selected_model = ENGLISH_MODELS[0]
 
-    # Gọi hàm async để tạo speech
-    word_timings = loop.run_until_complete(
-        generate_speech_with_edge_tts(text, output_path, voice, rate)
+    logger.info(f"Đang sử dụng mô hình: {selected_model}")
+    success = tts_wrapper.load_model(selected_model)
+
+    if not success:
+        logger.error(
+            "Không thể khởi tạo Coqui TTS, vui lòng kiểm tra xem mô hình có sẵn không"
+        )
+        return output_path, []
+
+    # Tổng hợp giọng nói
+    # Đối với mô hình đa giọng, chúng ta có thể truyền tham số speaker,
+    # nhưng hiện tại chúng ta chỉ sử dụng mô hình đơn giọng nên bỏ qua
+    output_path, word_timings = tts_wrapper.synthesize(
+        text=text,
+        output_path=output_path,
+        speaker=None,  # Coqui TTS mô hình đơn giọng không cần tham số này
+        speed=speed,
     )
 
-    # Lưu timing data vào file nếu được chỉ định
-    if timing_file:
+    # Lưu dữ liệu timing nếu được yêu cầu
+    if timing_file and word_timings:
         with open(timing_file, "w", encoding="utf-8") as f:
             json.dump(word_timings, f, ensure_ascii=False, indent=2)
 
     return output_path, word_timings
+
+
+if __name__ == "__main__":
+    # Thử nghiệm Coqui TTS
+    print("Đang thử nghiệm Coqui TTS...")
+    test_text = "Xin chào, đây là bài kiểm tra Coqui TTS. Tôi đang nói tiếng Việt."
+    output_path = "test_coqui.mp3"
+
+    result_path, timings = text_to_speech(test_text, output_path)
+    print(f"Audio đã lưu tại: {result_path}")
+    print(f"Đã tạo {len(timings)} timing từ")
