@@ -16,7 +16,24 @@ logger = logging.getLogger(__name__)
 
 
 def normalize_path_for_ffmpeg(path):
-    return str(path).replace("\\", "/").replace(":", "\\:")
+    """
+    Chuẩn hóa đường dẫn để sử dụng với ffmpeg trên Windows.
+    Đảm bảo đường dẫn luôn là tuyệt đối, sử dụng dấu / thay vì \,
+    và xử lý các ký tự đặc biệt.
+
+    Args:
+        path (str): Đường dẫn cần chuẩn hóa
+
+    Returns:
+        str: Đường dẫn đã chuẩn hóa
+    """
+    import pathlib
+
+    # Chuyển đổi thành đường dẫn tuyệt đối
+    abs_path = str(pathlib.Path(path).absolute())
+    # Thay thế dấu \ bằng /
+    normalized_path = abs_path.replace("\\", "/")
+    return normalized_path
 
 
 def create_video(image_path, audio_path, output_path, subtitle_path=None):
@@ -171,7 +188,6 @@ def create_video_with_segments(
         for img_path in valid_image_paths:
             # Lấy đường dẫn tuyệt đối
             img_path_escaped = normalize_path_for_ffmpeg(img_path)
-            img_path_escaped = img_path_escaped.replace("output/", "")
             f.write(f"file '{img_path_escaped}'\n")
             f.write(f"duration {segment_duration}\n")
 
@@ -266,66 +282,77 @@ def create_video_with_segments(
                 subtitle_content = f.read()
 
             if not subtitle_content.strip():
-                logger.warning(f"File phụ đề rỗng: {subtitle_path}")
+                print(f"File phụ đề rỗng: {subtitle_path}")
                 # Kiểm tra và xử lý nếu file đích đã tồn tại
                 if os.path.exists(output_path):
                     os.remove(output_path)
                 os.rename(temp_video, output_path)
+                return output_path
 
-                # Dọn dẹp file tạm
-                if os.path.exists(temp_video_no_audio):
-                    os.remove(temp_video_no_audio)
-                if os.path.exists(concat_file_path):
-                    os.remove(concat_file_path)
+            # Sử dụng đường dẫn tuyệt đối cho Windows
+            import pathlib
 
-                return output_path  # Sử dụng đường dẫn tuyệt đối cho Windows
-            subtitle_path_escaped = os.path.abspath(subtitle_path)
+            subtitle_absolute_path = pathlib.Path(subtitle_path).absolute()
+
+            # Escape đường dẫn phụ đề cho ffmpeg theo cách đảm bảo hoạt động trên Windows
+            subtitle_path_escaped = (
+                str(subtitle_absolute_path).replace("\\", "/").replace(":", "\\:")
+            )
 
             # Sử dụng subtitles filter với các tùy chọn để phụ đề lớn, đậm, màu trắng viền xanh, ở giữa
             subtitle_options = f"force_style='Fontname=Arial,Fontsize=28,PrimaryColour=&HFFFFFF,OutlineColour=&H0000FF,BorderStyle=1,Outline=3,Shadow=0,Alignment=2,MarginV=35'"
+
+            # In thông tin debug
+            print(f"Subtitle path: {subtitle_path}")
+            print(f"Subtitle path escaped: {subtitle_path_escaped}")
+            print(f"Output path: {output_path}")
 
             try:
                 # Kiểm tra và xóa file đích nếu đã tồn tại
                 if os.path.exists(output_path):
                     os.remove(output_path)
 
-                # Sử dụng subprocess để thêm phụ đề
-                import subprocess
+                # Sử dụng cả hai cách để thử gắn phụ đề
+                try:
+                    # Cách 1: Sử dụng vf=subtitles trực tiếp
+                    (
+                        ffmpeg.output(
+                            video_with_subtitles,
+                            output_path,
+                            vf=f"subtitles='{subtitle_path_escaped}':{subtitle_options}",
+                            vcodec="libx264",
+                            acodec="copy",
+                        ).run(overwrite_output=True)
+                    )
+                except Exception as e1:
+                    print(f"Lỗi phương pháp 1: {str(e1)}")
 
-                # Chuẩn bị phần filter cho phụ đề
-                subtitle_filter = (
-                    f"subtitles='{subtitle_path_escaped}':{subtitle_options}"
-                )
+                    # Cách 2: Sử dụng options thông qua -vf flag
+                    import subprocess
 
-                cmd_subtitle = [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    temp_video,
-                    "-vf",
-                    subtitle_filter,
-                    "-c:v",
-                    "libx264",
-                    "-c:a",
-                    "copy",
-                    output_path,
-                ]
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        temp_video,
+                        "-vf",
+                        f"subtitles='{subtitle_path_escaped}':{subtitle_options}",
+                        "-c:v",
+                        "libx264",
+                        "-c:a",
+                        "copy",
+                        output_path,
+                    ]
+                    print(f"Lệnh ffmpeg: {' '.join(cmd)}")
+                    result = subprocess.run(cmd, capture_output=True, text=True)
 
-                logger.info(f"Chạy lệnh thêm phụ đề: {' '.join(cmd_subtitle)}")
-                result_subtitle = subprocess.run(
-                    cmd_subtitle, capture_output=True, text=True
-                )
-
-                if result_subtitle.returncode != 0:
-                    logger.error(f"Lỗi khi thêm phụ đề: {result_subtitle.stderr}")
-                    raise Exception(result_subtitle.stderr)
-                else:
-                    logger.info("Thêm phụ đề vào video thành công")
+                    if result.returncode != 0:
+                        print(f"Lỗi phương pháp 2: {result.stderr}")
+                        raise Exception(result.stderr)
 
             except Exception as e:
-                logger.error(f"Lỗi khi thêm phụ đề: {str(e)}")
-
-                # Sử dụng video không có phụ đề
+                print(f"Lỗi khi gắn phụ đề: {str(e)}")
+                # Fallback: sử dụng video không có phụ đề
                 if os.path.exists(output_path):
                     os.remove(output_path)
                 os.rename(temp_video, output_path)
