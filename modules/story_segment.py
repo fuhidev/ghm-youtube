@@ -430,35 +430,37 @@ def process_story_for_images(
     # Create segments and prompts
     segmenter = StorySegmenter(story_text, num_images)
     segments = segmenter.segment_by_paragraphs()
-    prompts = segmenter.generate_prompts()
-    segmenter.save_segments_and_prompts(output_dir)
+    # prompts = segmenter.generate_prompts()
+    # segmenter.save_segments_and_prompts(output_dir)
 
-    # Generate images
-    image_generator = LeonardoImageGenerator(api_key)
+    # # Generate images
+    # image_generator = LeonardoImageGenerator(api_key)
     image_paths = []
 
-    for i, prompt in enumerate(prompts):
-        if not prompt:
-            # Skip empty prompts
-            logger.warning(f"Skipping segment {i+1} due to empty prompt")
-            image_paths.append("")
-            continue
+    # for i, prompt in enumerate(prompts):
+    #     if not prompt:
+    #         # Skip empty prompts
+    #         logger.warning(f"Skipping segment {i+1} due to empty prompt")
+    #         image_paths.append("")
+    #         continue
 
-        logger.info(f"Generating image for segment {i+1}/{num_images}")
-        # image_url = image_generator.generate_image(prompt)
+    #     logger.info(f"Generating image for segment {i+1}/{num_images}")
+    #     # image_url = image_generator.generate_image(prompt)
 
-        # if image_url:
-        #     # Download the image
-        #     image_path = os.path.join(output_dir, f"image_{i+1:02d}.png")
-        #     success = image_generator.download_image(image_url, image_path)
+    #     # if image_url:
+    #     #     # Download the image
+    #     #     image_path = os.path.join(output_dir, f"image_{i+1:02d}.png")
+    #     #     success = image_generator.download_image(image_url, image_path)
 
-        #     if success:
-        #         image_paths.append(image_path)
-        #     else:
-        #         image_paths.append("")
-        # else:
-        #     image_paths.append("")
-        image_paths.append("output\segment_images\image_01.png")
+    #     #     if success:
+    #     #         image_paths.append(image_path)
+    #     #     else:
+    #     #         image_paths.append("")
+    #     # else:
+    #     #     image_paths.append("")
+    image_paths.append("output\default_image_1.jpg")
+    image_paths.append("output\default_image_2.jpg")
+    image_paths.append("output\default_image_3.jpg")
     return image_paths
 
 
